@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "OpenTag")(type "KiCad")(uri "${KIPRJMOD}/OpenTag.kicad_sym")(options "")(descr ""))
+)

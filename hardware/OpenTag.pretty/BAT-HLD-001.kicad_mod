@@ -1,0 +1,115 @@
+(footprint "BAT-HLD-001"
+	(version 20240108)
+	(generator "pcbnew")
+	(generator_version "8.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 11.25 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "0946500e-abe0-4dc4-a886-74f014617db4")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "BAT-HLD-001"
+		(at 0 12.75 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "163f7a75-6c78-4629-8e69-bd91c3c56dde")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Footprint" ""
+		(at 0 11.75 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "01844457-0baf-4779-bc54-11f458780a50")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 11.75 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "bbfd6f36-c215-403e-9465-25ee6857f3d9")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 11.75 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "2301b5ac-1f31-45f6-900b-e3e44ae1cf13")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_text user "${REFERENCE}"
+		(at 0 14.25 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "cc60042c-3b0a-4315-8e32-bf592e8c6b8c")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" smd roundrect
+		(at -11.45 0)
+		(size 2.5 5.1)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(roundrect_rratio 0.25)
+		(thermal_bridge_angle 45)
+		(uuid "536244da-206f-4dc2-99a7-1a6b3f7c1627")
+	)
+	(pad "1" smd roundrect
+		(at 11.45 0)
+		(size 2.5 5.1)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(roundrect_rratio 0.25)
+		(thermal_bridge_angle 45)
+		(uuid "7158a406-0659-413e-a461-8db71c91300e")
+	)
+	(pad "2" smd circle
+		(at 0 0)
+		(size 17.8 17.8)
+		(layers "F.Cu" "F.Mask")
+		(uuid "cf121236-f8b4-470a-aec4-bd3a3953f2dc")
+	)
+	(model "${KIPRJMOD}/3D/BAT-HLD-001.stp"
+		(offset
+			(xyz 0 -2.3 2.1)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)
