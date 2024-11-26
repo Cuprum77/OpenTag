@@ -2,7 +2,7 @@
 
 # Software Overview
 
-This project uses [Macless-Haystack](https://github.com/dchristl/macless-haystack). Follow their instructions to set up a server and use the keys you generate to view the location of your tags. The simplest setup is to run the server on a Raspberry Pi with Tailscale and use the [Macless-Haystack](https://github.com/dchristl/macless-haystack) Android app or web viewer for access. With Tailscale, you can use a hostname like `https://myrpi.tail12345.ts.net:6176/` as the server URL in those. To access the locations from your server, you simply need to connect the client device to the Tailnet.
+This project is based on and uses [Macless-Haystack](https://github.com/dchristl/macless-haystack). Follow their instructions to set up a server and use the keys you generate to view the location of your tags. The simplest setup is to run the server on a Raspberry Pi with Tailscale and use the [Macless-Haystack](https://github.com/dchristl/macless-haystack) Android app or web viewer for access. With Tailscale, you can use a hostname like `https://myrpi.tail12345.ts.net:6176/` as the server URL in those. To access the locations from your server, you simply need to connect the client device to the Tailnet.
 
 ---
 
@@ -12,7 +12,7 @@ The firmware is written in C/C++ using STM32CubeIDE. You don't need to compile t
 - 1 key broadcast per minute
 - 10 key re-use cycles (key changes once every 10 minutes)
 
-To modify the key refresh rate, change the RTC wakeup [here](TODO).
+You can modify these [here](STM32WB_BT_TAG/STM32_WPAN/App/app_ble.c#L177-L185).
 
 ---
 
@@ -45,7 +45,7 @@ Make absolutely sure you start the wireless stack after you flash it, without pr
 Once the wireless stack is set up, proceed as follows:
 
 1. Open the **"Erasing & Programming"** section in STM32CubeProgrammer.  
-2. Select the binary file located [here](TODO).  
+2. Select the binary file located [here](STM32WB_BT_TAG/Release/STM32WB_BT_TAG.hex).  
 3. Ensure all checkmarks are **unchecked**.  
 4. Click **Start Programming**.  
 
