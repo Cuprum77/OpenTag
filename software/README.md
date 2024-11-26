@@ -10,7 +10,7 @@ This project uses [Macless-Haystack](https://github.com/dchristl/macless-haystac
 
 The firmware is written in C/C++ using STM32CubeIDE. You don't need to compile the firmware if you are fine with the default settings:
 - 1 key broadcast per minute
-- No additional features (yet)
+- 10 key re-use cycles (key changes once every 10 minutes)
 
 To modify the key refresh rate, change the RTC wakeup [here](TODO).
 
