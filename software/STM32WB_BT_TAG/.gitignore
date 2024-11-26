@@ -1,0 +1,17 @@
+# VSC
+.vscode
+
+# STM32CubeIDE
+.metadata/
+.settings/
+Debug/
+# Ignore everything in the Release folder
+Release/**
+# But do not ignore .bin and .hex files in the Release folder
+!Release/*.bin
+!Release/*.hex
+*.ld
+
+
+
+
