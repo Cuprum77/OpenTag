@@ -24,14 +24,23 @@ You can modify these [here](STM32WB_BT_TAG/STM32_WPAN/App/app_ble.c#L177-L185).
 2. **Prepare Your Hardware**:  
    Short the `BOOT0` jumper to the 3V3 rail (2nd jumper from the top on the right side if viewed with antenna up).
    Connect your board to a debugger (preferably an ST-LINK), and connect the debugger to your computer.
+   BOOT0 (top right) and the pinout of the debug connector (bottom right) is shown below:
+   
+   ![Image of the board layout](/software/images/pinout.png)
 
-3. **Install the Wireless Stack and Firmware Update Service**:  
+4. **Install the Wireless Stack and Firmware Update Service**:  
    Basically you need to visit [STM32WB_Copro_Wireless_Binaries](https://github.com/STMicroelectronics/STM32CubeWB/tree/master/Projects/STM32WB_Copro_Wireless_Binaries) and download 3 files:
    - `stm32wb3x_FUS_fw.bin`
    - `stm32wb3x_BLE_Stack_full_fw.bin`
    - `Release_Notes.html`
    
-   Open `Release_Notes.html` in your browser. Here you need to find a table called "FW Upgrade Services Binary", it should include an entry for `stm32wb3x_FUS_fw.bin` and the address we need to program to depending on flash size. Use [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html) to find what flash size you have (shown in bottom right after you connect to the target). Open the **"Firmware Upgrade Services"** tab in STM32CubeProgrammer, click **"Start FUS"** under the **"WB Commands"** section, and then **"Read FUS infos"**. This will show you the current FUS version. Now select `stm32wb3x_FUS_fw.bin` in the file selector, enter the start address if STM32CubeProgrammer doesn't offer to auto detect the address. Hit **"Firmware Upgrade"** and wait for it to finish, once it's done once again click "Start FUS" and **"Read FUS infos"** and double check if the FUS version matches the one you downloaded.
+   Open `Release_Notes.html` in your browser. Here you need to find a table called "FW Upgrade Services Binary", it should include an entry for `stm32wb3x_FUS_fw.bin` and the address we need to program to depending on flash size. Use [STM32CubeProgrammer](https://www.st.com/en/development-tools/stm32cubeprog.html) to find what flash size you have (shown in bottom right after you connect to the target).
+
+   ![Screenshot of STM32CubeProgrammer showing target info](/software/images/target_info.png)
+
+   Open the **"Firmware Upgrade Services"** tab in STM32CubeProgrammer, click **"Start FUS"** under the **"WB Commands"** section, and then **"Read FUS infos"**. This will show you the current FUS version. Now select `stm32wb3x_FUS_fw.bin` in the file selector, enter the start address if STM32CubeProgrammer doesn't offer to auto detect the address. Hit **"Firmware Upgrade"** and wait for it to finish, once it's done once again click "Start FUS" and **"Read FUS infos"** and double check if the FUS version matches the one you downloaded.
+
+   ![Screenshot of STM32CubeProgrammer](/software/images/cubeprog.png)
 
    Now you need to program the BLE stack. Take the `stm32wb3x_BLE_Stack_full_fw.bin` file and find it in `Release_Notes.html` to find the address depending on the flash size. Now select `stm32wb3x_BLE_Stack_full_fw.bin` in the file selector, enter the start address if STM32CubeProgrammer doesn't offer to auto detect the address and hit **"Firmware Upgrade"**. After this is done you should be able to "Read FUS infos" and see a **"STACK Version"** that shows an actual version and is not full of zeroes.
 
