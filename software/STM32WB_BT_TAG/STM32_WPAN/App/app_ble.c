@@ -175,14 +175,14 @@ typedef struct
 you put in this address, select the option to skip flash erase and program. The linker in this cubemx project is setup to not overwrite a 4k region after this address.*/
 #define KEY_ADDR 0x0803F000
 /* Define how often (long) a key will be reused after switching to the next one
-This is for using less keys after all. The interval for one key is (DELAY_IN_S * REUSE_CYCLES => 60s * 30 cycles = changes key every 30 min)
+This is for using less keys after all. The interval for one key is (DELAY_IN_S * REUSE_CYCLES => 10s * 360 cycles = changes key every 60 min)
 Smaller number of cycles = key changes more often, but more keys needed.
 */
-#define REUSE_CYCLES 10
+#define REUSE_CYCLES 360
 
-/* A sleep cycle is 30 seconds of sleep, so 2 cycles is 60 seconds of sleep.
+/* A sleep cycle is 10 seconds of sleep, so 2 cycles is 20 seconds of sleep and so on.
 */
-#define SLEEP_CYCLES 2
+#define SLEEP_CYCLES 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -267,7 +267,7 @@ uint8_t key_index = 0;
 uint8_t old_key_index = 0;
 uint8_t key_count = 0;
 
-uint8_t cycle = 0;
+uint16_t cycle = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -758,7 +758,7 @@ void Send_Out_Adv(void){
   }
 
   // turn on LED
-  // HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
+//   HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
   // start advertising
   Adv_Request(APP_BLE_FAST_ADV);
   // wait for a few ms for the 2nd core to start advertising
@@ -768,7 +768,7 @@ void Send_Out_Adv(void){
   // wait for 1ms for the 2nd core to stop advertising
   HAL_Delay(1);
   // turn off LED
-  // HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
+//   HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
 
   // increment key index for next time
   if (cycle >= REUSE_CYCLES){
@@ -780,9 +780,9 @@ void Send_Out_Adv(void){
 
   // go back into deep sleep
   for(int i = 0; i < SLEEP_CYCLES; i++){
-    //////// DEEP SLEEP START (~30seconds)
+    //////// DEEP SLEEP START (~10seconds)
     HAL_SuspendTick();
-    HAL_RTCEx_SetWakeUpTimer_IT(&hrtc_ble, 0xfffe, RTC_WAKEUPCLOCK_RTCCLK_DIV16);
+    HAL_RTCEx_SetWakeUpTimer_IT(&hrtc_ble, 0x5554, RTC_WAKEUPCLOCK_RTCCLK_DIV16);
     /* Enter STOP 2 mode */
     HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
     HAL_RTCEx_DeactivateWakeUpTimer(&hrtc_ble);
