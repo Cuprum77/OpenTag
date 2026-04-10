@@ -34,7 +34,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -64,7 +64,7 @@ void Error_Handler(void);
 #define LED_PIN_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+extern bool cold_start_flag;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

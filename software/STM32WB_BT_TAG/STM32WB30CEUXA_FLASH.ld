@@ -44,10 +44,11 @@ _Min_Stack_Size = 0x400;   /* required amount of stack */
 /* Specify the memory areas */
 MEMORY
 {
-    FLASH (rx)                 : ORIGIN = 0x08000000, LENGTH = 252K     /* Adjusted size */
-    DATA_PAGE (rx)             : ORIGIN = 0x0803F000, LENGTH = 4K       /* New 4K reserved area */
-    RAM (xrw)                  : ORIGIN = 0x20000008, LENGTH = 0x7FF8
-    RAM_SHARED (xrw)           : ORIGIN = 0x20030000, LENGTH = 10K
+    FLASH (rx)            : ORIGIN = 0x08000000, LENGTH = 128K     /* Program Binary Space */
+    DATA_PAGE_GOOGLE (rx) : ORIGIN = 0x08020000, LENGTH = 64K      /* Google Key Space */
+    DATA_PAGE_APPLE (rx)  : ORIGIN = 0x08030000, LENGTH = 64K      /* Apple Key Space */		
+    RAM (xrw)             : ORIGIN = 0x20000008, LENGTH = 0x7FF8
+    RAM_SHARED (xrw)      : ORIGIN = 0x20030000, LENGTH = 10K
 }
 
 
@@ -55,11 +56,17 @@ MEMORY
 SECTIONS
 {
 
-  /* Define a section for the reserved flash page */
-  .data_page (NOLOAD) :
+  /* Define a section for the Google key flash area */
+  .data_page_google (NOLOAD) :
   {
-    KEEP(*(.data_page))
-  } > DATA_
+    KEEP(*(.data_page_google))
+  } > DATA_PAGE_GOOGLE
+
+  /* Define a section for the Apple key flash page */
+  .data_page_apple (NOLOAD) :
+  {
+    KEEP(*(.data_page_apple))
+  } > DATA_PAGE_APPLE
 
 
   /* The startup code goes first into FLASH */

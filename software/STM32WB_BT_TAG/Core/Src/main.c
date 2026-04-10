@@ -47,6 +47,7 @@ IPCC_HandleTypeDef hipcc;
 RTC_HandleTypeDef hrtc;
 
 /* USER CODE BEGIN PV */
+bool cold_start_flag = true;
 
 /* USER CODE END PV */
 
@@ -111,7 +112,9 @@ int main(void)
   MX_CRC_Init();
   MX_RF_Init();
   /* USER CODE BEGIN 2 */
-
+  cold_start_flag = true; // Set this first start flag to have the TAG remain not asleep for a little bit
+	// the configurable (30 seconds by default) window is needed to allow you to attach a debugger to the MCU
+	// before it goes to sleep, as well as potentially in the future allow some BT commands for configuration
   /* USER CODE END 2 */
 
   /* Init code for STM32_WPAN */

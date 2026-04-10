@@ -171,17 +171,61 @@ typedef struct
 #define BD_ADDR_SIZE_LOCAL    6
 
 /* USER CODE BEGIN PD */
-/* Defines the address where the keys are put, this can be done with stm32cubeprogrammer, in the erasing and programming section,
-you put in this address, select the option to skip flash erase and program. The linker in this cubemx project is setup to not overwrite a 4k region after this address.*/
-#define KEY_ADDR 0x0803F000
-/* Define how often (long) a key will be reused after switching to the next one
-This is for using less keys after all. The interval for one key is (DELAY_IN_S * REUSE_CYCLES => 10s * 360 cycles = changes key every 60 min)
-Smaller number of cycles = key changes more often, but more keys needed.
+/* Defines how long the tag will stay on and not go to sleep after a cold startup
+ * This is useful to connect to a debugger or to check if the advertised payload is correct.
+ */
+#define COLD_START_ACTIVE_TIME_S 30
+
+/*
+* Turn on the LED when sending out advertising data, this is useful for debugging to see when the tag is advertising
+* but should be disabled for normal use to save power. 
+* (comment out to disable)
 */
+#define ENABLE_ADV_LED_DEBUG
+
+/* Defines the address where the airtag keys are put, this can be done with stm32cubeprogrammer, in the erasing and programming section,
+ * you put in this address, select the option to NOT skip flash erase and program. The linker in this cubemx project is setup to not overwrite a 64k region after this address.
+ */
+#define KEY_ADDR_GOOGLE 0x08020000
+#define KEY_ADDR_APPLE 0x08030000
+
+#define GOOGLE_EID_LEN_BYTES 20
+#define APPLE_KEY_LEN_BYTES 28
+
+#define GOOGLE_NUMKEYS_FIELD_BYTES 2
+#define APPLE_NUMKEYS_FIELD_BYTES 1
+
+typedef enum adv_type {
+  APPLE = 0,
+  GOOGLE = 1
+} adv_type_t;
+
+// You can define the order and frequency of advertising here.
+// Examples:
+// adv_type_t adv_order[] = {APPLE, GOOGLE};          // alternate each cycle
+// adv_type_t adv_order[] = {APPLE, APPLE, GOOGLE};   // advertise Apple twice as much as Google
+// adv_type_t adv_order[] = {APPLE};                  // only advertise Apple
+// adv_type_t adv_order[] = {GOOGLE};                 // only advertise Google
+// Note that switching between the advertisement types takes a bit more time and thus energy
+// So, it is better to repeat a key a few times before switching
+adv_type_t adv_order[] = {APPLE, APPLE, APPLE, GOOGLE, GOOGLE, GOOGLE};
+
+#define ADV_ORDER_LEN (sizeof(adv_order) / sizeof(adv_order[0]))
+
+// Counted on startup and then used later to gate logic (so we can skip the paths that are never advertising)
+int num_google = -1;
+int num_apple = -1;
+size_t adv_order_index = 0;
+
+/* Define how often (long) a key will be reused after switching to the next one
+ * The interval for one key is (DELAY_IN_S * REUSE_CYCLES => 10s * 360 cycles = changes key every 60 min)
+ * Smaller number of cycles = key changes more often, but more keys needed.
+ * You can calculate how much time it will take for all keys to be used up and it will roll around:
+ * (DELAY_IN_S * REUSE_CYCLES * NUM_KEYS => 10s * 360 cycles * 32 keys = keys will wrap around every 32 hours)
+ */
 #define REUSE_CYCLES 360
 
-/* A sleep cycle is 10 seconds of sleep, so 2 cycles is 20 seconds of sleep and so on.
-*/
+/* A sleep cycle is 10 seconds of sleep, so 2 cycles is 20 seconds of sleep and so on.*/
 #define SLEEP_CYCLES 1
 /* USER CODE END PD */
 
@@ -242,8 +286,7 @@ uint8_t a_AdvData[5] =
 };
 
 /* USER CODE BEGIN PV */
-// our own advertising data, because cubemx has a limitation to a max length of 21 for some reason
-uint8_t custom_a_AdvData[31] = {
+const uint8_t apple_adv_data_template[31] = {
   0x1e,       /* Length (30) */                                   // 0            <- Static
   0xff,       /* Manufacturer Specific Data (type 0xff) */        // 1            <- Static
   0x4c, 0x00, /* Company ID (Apple) */                            // 2 3          <- Static
@@ -256,18 +299,48 @@ uint8_t custom_a_AdvData[31] = {
   0x00, /* Hint (0x00) */                                         // 30           <- Static
 };
 
+const uint8_t google_adv_data_template[31] = {
+    0x02,   // Length                             // 0            <- Static
+    0x01,   // Flags data type value              // 1            <- Static
+    0x06,   // Flags data                         // 2            <- Static
+    0x19,   // Length                             // 3            <- Static
+    0x16,   // Service data data type value       // 4            <- Static
+    0xAA,   // 16-bit service UUID                // 5            <- Static
+    0xFE,   // 16-bit service UUID                // 6            <- Static
+    0x41,   // FMDN frame type with unwanted      // 7            <- Static
+            // tracking protection mode indication
+    0x00, 0x00, 0x00, 0x00, 0x00,                 // 8 - 12   }
+    0x00, 0x00, 0x00, 0x00, 0x00,                 // 13 - 17  }   <- 20-byte ephemeral identifier
+    0x00, 0x00, 0x00, 0x00, 0x00,                 // 18 - 22  }
+    0x00, 0x00, 0x00, 0x00, 0x00,                 // 23 - 27  }
+    0x00, 0x00, 0x00, // Hashed flags             // 28 - 30
+};
+
+// our own advertising data, because cubemx has a limitation to a max length of 21 for some reason
+uint8_t custom_a_AdvData[31] = { 0 };
+
 // set our own variable for the MAC address
 uint8_t custom_p_bd_addr[6] = {
   0xFF, 0xCC, 0xCC, 0xCC, 0xCC, 0xFF
 };
 
-static uint8_t public_key[28];
+static uint8_t public_key_apple[APPLE_KEY_LEN_BYTES] = { 0 };
+static uint8_t public_key_google[GOOGLE_EID_LEN_BYTES] = { 0 };
+static uint8_t google_mac_addr[6] = { 0 };
+static bool google_mac_valid = false;
 
-uint8_t key_index = 0;
-uint8_t old_key_index = 0;
-uint8_t key_count = 0;
+uint8_t key_index_apple = 0;
+uint8_t old_key_index_apple = 0;
+uint16_t key_count_apple = 0;
+uint16_t key_cycle_apple = 0;
 
-uint16_t cycle = 0;
+uint16_t key_index_google = 0;
+uint16_t old_key_index_google = 0;
+uint16_t key_count_google = 0;
+uint16_t key_cycle_google = 0;
+
+adv_type_t current_adv_type = APPLE;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -288,8 +361,10 @@ void SystemClock_Config_ble(void);
 RTC_HandleTypeDef hrtc_ble;
 static void MX_RTC_Init_ble(void);
 static void load_bytes_from_partition(uint8_t *dst, size_t size, uint32_t address);
-void set_addr_from_key(uint8_t *addr, uint8_t *public_key);
-void set_payload_from_key(uint8_t *payload, uint8_t *public_key);
+void set_addr_from_key(uint8_t *addr, uint8_t *public_key, adv_type_t type);
+void set_payload_from_key(uint8_t *payload, uint8_t *public_key, adv_type_t type);
+adv_type_t get_adv_type_from_order(void);
+void advance_adv_order(void);
 /* USER CODE END PFP */
 
 /* External variables --------------------------------------------------------*/
@@ -307,23 +382,97 @@ void APP_BLE_Init(void)
 #endif /* RADIO_ACTIVITY_EVENT != 0 */
   /* USER CODE BEGIN APP_BLE_Init_1 */
   UTIL_SEQ_Init();
+
+  num_apple = 0;
+  num_google = 0;
+  // Count the number of keys of each in the sequence
+  for (size_t i = 0; i < ADV_ORDER_LEN; i++)
+  {
+    if (adv_order[i] == APPLE)
+    {
+      num_apple++;
+    }
+    else if (adv_order[i] == GOOGLE)
+    {
+      num_google++;
+    }
+  }
+
+  current_adv_type = get_adv_type_from_order();
   
-  uint8_t keyCount[1];
-  load_bytes_from_partition(keyCount, sizeof(keyCount), KEY_ADDR);
-  key_count = keyCount[0];
+  uint8_t keyCountApple[APPLE_NUMKEYS_FIELD_BYTES];
+  if (num_apple > 0)
+  {
+    load_bytes_from_partition(keyCountApple, sizeof(keyCountApple), KEY_ADDR_APPLE);
+#if APPLE_NUMKEYS_FIELD_BYTES == 1
+    key_count_apple = keyCountApple[0];
+#elif APPLE_NUMKEYS_FIELD_BYTES == 2
+    key_count_apple = keyCountApple[0] | (keyCountApple[1] << 8);
+#endif
+  }
+
+  uint8_t keyCountGoogle[GOOGLE_NUMKEYS_FIELD_BYTES];
+  if (num_google > 0)
+  {
+    load_bytes_from_partition(keyCountGoogle, sizeof(keyCountGoogle), KEY_ADDR_GOOGLE);
+#if GOOGLE_NUMKEYS_FIELD_BYTES == 1
+    key_count_google = keyCountGoogle[0];
+#elif GOOGLE_NUMKEYS_FIELD_BYTES == 2
+    key_count_google = keyCountGoogle[0] | (keyCountGoogle[1] << 8);
+#endif
+  }
 
   // choose a random key to start with
-  key_index = HAL_GetTick() % key_count;  // not cryptographically secure, but good enough for this
-  old_key_index = key_index;
-  cycle = 0;
+  if (num_apple > 0 && key_count_apple > 0)
+  {
+	  key_index_apple = HAL_GetTick() % key_count_apple;
+  }
+  if (num_google > 0 && key_count_google > 0)
+  {
+	  key_index_google = HAL_GetTick() % key_count_google;
+  }
 
-  uint32_t address = 1 + (key_index * sizeof(public_key)) + KEY_ADDR;
-  load_bytes_from_partition(public_key, sizeof(public_key), address);
+  if(key_count_apple == key_count_google){
+	  key_index_google = key_index_apple;
+  }
+
+  old_key_index_apple = key_index_apple;
+  old_key_index_google = key_index_google;
+  key_cycle_apple = 0;
+  key_cycle_google = 0;
+  
+
+  if (num_apple > 0)
+  {
+    uint32_t addressApple = APPLE_NUMKEYS_FIELD_BYTES + (key_index_apple * sizeof(public_key_apple)) + KEY_ADDR_APPLE;
+    load_bytes_from_partition(public_key_apple, sizeof(public_key_apple), addressApple);
+  }
+
+  if (num_google > 0)
+  {
+    uint32_t addressGoogle = GOOGLE_NUMKEYS_FIELD_BYTES + (key_index_google * sizeof(public_key_google)) + KEY_ADDR_GOOGLE;
+    load_bytes_from_partition(public_key_google, sizeof(public_key_google), addressGoogle);
+    set_addr_from_key(google_mac_addr, public_key_google, GOOGLE);
+    google_mac_valid = true;
+  }
 
   // set the address and payload from the key
-  set_addr_from_key(custom_p_bd_addr, public_key);
-  set_payload_from_key(custom_a_AdvData, public_key);
-
+  if(current_adv_type == APPLE) {
+    set_addr_from_key(custom_p_bd_addr, public_key_apple, current_adv_type);
+    set_payload_from_key(custom_a_AdvData, public_key_apple, current_adv_type);
+  } else {
+    if (google_mac_valid)
+    {
+      memcpy(custom_p_bd_addr, google_mac_addr, sizeof(custom_p_bd_addr));
+    }
+    else
+    {
+      set_addr_from_key(google_mac_addr, public_key_google, GOOGLE);
+      google_mac_valid = true;
+      memcpy(custom_p_bd_addr, google_mac_addr, sizeof(custom_p_bd_addr));
+    }
+    set_payload_from_key(custom_a_AdvData, public_key_google, current_adv_type);
+  }
   /* USER CODE END APP_BLE_Init_1 */
   SHCI_C2_Ble_Init_Cmd_Packet_t ble_init_cmd_packet =
   {
@@ -741,42 +890,152 @@ APP_BLE_ConnStatus_t APP_BLE_Get_Server_Connection_Status(void)
 }
 
 /* USER CODE BEGIN FD*/
+void perform_advertising_cycle(adv_type_t type, bool rotate){
+  static uint16_t adv_delay_len_ms = 18;
+  static uint16_t adv_settings_delay_len_ms = 5;
+  static uint16_t stop_adv_delay_len_ms = 1;
+  static adv_type_t old_adv_type = 0xFF; // invalid value to force update on first run
+  tBleStatus ret;
+  if(type == APPLE){
+    
+    // Get the key as needed
+    if(old_key_index_apple != key_index_apple){
+      // key has changed, update the address and payload
+      uint32_t address = APPLE_NUMKEYS_FIELD_BYTES + (key_index_apple * sizeof(public_key_apple)) + KEY_ADDR_APPLE;
+      load_bytes_from_partition(public_key_apple, sizeof(public_key_apple), address);
+
+      set_addr_from_key(custom_p_bd_addr, public_key_apple, APPLE);
+      set_payload_from_key(custom_a_AdvData, public_key_apple, APPLE);
+
+      // TODO check if this works
+      // Ble_Hci_Gap_Gatt_Init();
+
+      old_key_index_apple = key_index_apple;
+    }
+    
+    if(old_adv_type != type){
+      // adv type has changed, update the address and payload
+      set_addr_from_key(custom_p_bd_addr, public_key_apple, APPLE);
+      set_payload_from_key(custom_a_AdvData, public_key_apple, APPLE);
+      ret = aci_hal_write_config_data(CONFIG_DATA_PUBADDR_OFFSET, CONFIG_DATA_PUBADDR_LEN, (uint8_t*)custom_p_bd_addr);
+      if (ret != BLE_STATUS_SUCCESS)
+      {
+        APP_DBG_MSG("==>> Failed to update Apple advertising address, result: 0x%x\n", ret);
+      }
+      HAL_Delay(adv_settings_delay_len_ms);
+      old_adv_type = type;
+    }
+
+    // start advertising
+    Adv_Request(APP_BLE_FAST_ADV);
+    // wait for a few ms for the 2nd core to start advertising
+    HAL_Delay(adv_delay_len_ms);
+    // stop advertising
+    Adv_Cancel();
+    // wait for 1ms for the 2nd core to stop advertising
+    HAL_Delay(stop_adv_delay_len_ms);
+
+    // increment key index for next time
+    if ((key_cycle_apple >= REUSE_CYCLES) && rotate){
+      key_index_apple = (key_index_apple + 1) % key_count_apple; // Back to zero if out of range
+      key_cycle_apple = 0;
+    }else{
+      key_cycle_apple++;
+    }
+
+  }else if(type == GOOGLE){
+    // Get the key as needed
+    if(old_key_index_google != key_index_google){
+      // key has changed, update the address and payload
+      uint32_t address = GOOGLE_NUMKEYS_FIELD_BYTES + (key_index_google * sizeof(public_key_google)) + KEY_ADDR_GOOGLE;
+      load_bytes_from_partition(public_key_google, sizeof(public_key_google), address);
+
+      set_addr_from_key(google_mac_addr, public_key_google, GOOGLE);
+      google_mac_valid = true;
+      memcpy(custom_p_bd_addr, google_mac_addr, sizeof(custom_p_bd_addr));
+      set_payload_from_key(custom_a_AdvData, public_key_google, GOOGLE);
+
+      old_key_index_google = key_index_google;
+    }
+
+    if(old_adv_type != type){
+      // adv type has changed, update the address and payload
+      if (!google_mac_valid)
+      {
+        set_addr_from_key(google_mac_addr, public_key_google, GOOGLE);
+        google_mac_valid = true;
+      }
+      memcpy(custom_p_bd_addr, google_mac_addr, sizeof(custom_p_bd_addr));
+      set_payload_from_key(custom_a_AdvData, public_key_google, GOOGLE);
+      ret = aci_hal_write_config_data(CONFIG_DATA_PUBADDR_OFFSET, CONFIG_DATA_PUBADDR_LEN, (uint8_t*)custom_p_bd_addr);
+      if (ret != BLE_STATUS_SUCCESS)
+      {
+        APP_DBG_MSG("==>> Failed to update Google advertising address, result: 0x%x\n", ret);
+      }
+      HAL_Delay(adv_settings_delay_len_ms);
+      old_adv_type = type;
+    }
+
+    // start advertising
+    Adv_Request(APP_BLE_FAST_ADV);
+
+    // wait for a few ms for the 2nd core to start advertising
+    HAL_Delay(adv_delay_len_ms);
+
+    // stop advertising
+    Adv_Cancel();
+
+    // wait for 1ms for the 2nd core to stop advertising
+    HAL_Delay(stop_adv_delay_len_ms);
+
+    // increment key index for next time
+    if ((key_cycle_google >= REUSE_CYCLES) && rotate){
+      key_index_google = (key_index_google + 1) % key_count_google; // Back to zero if out of range
+      key_cycle_google = 0;
+    }else{
+      key_cycle_google++;
+    }
+
+  }
+}
+
 void Send_Out_Adv(void){
 
-  if(old_key_index != key_index){
-    // key has changed, update the address and payload
-    uint32_t address = 1 + (key_index * sizeof(public_key)) + KEY_ADDR;
-    load_bytes_from_partition(public_key, sizeof(public_key), address);
+  #ifdef ENABLE_ADV_LED_DEBUG
+    // turn on LED
+    HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
+  #endif
+  
+  if(cold_start_flag){
+	  // keep the tag awake for the cold-start window
+	  for(int i = 0; i < COLD_START_ACTIVE_TIME_S; i++){
+		  HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
+		  HAL_Delay(100);
+      // Advertise both, for debugging purposes
+      {
+        current_adv_type = get_adv_type_from_order();
+        perform_advertising_cycle(current_adv_type, false);
+        advance_adv_order();
+      }
+		  HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
+		  HAL_Delay(900);
+	  }
 
-    set_addr_from_key(custom_p_bd_addr, public_key);
-    set_payload_from_key(custom_a_AdvData, public_key);
-
-    // TODO check if this works
-    Ble_Hci_Gap_Gatt_Init();
-
-    old_key_index = key_index;
+	  // blink one last time for a second to indicate that we are going to sleep
+	  HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
+	  HAL_Delay(1000);
+	  HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
+	  cold_start_flag = false;
   }
 
-  // turn on LED
-//   HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_SET);
-  // start advertising
-  Adv_Request(APP_BLE_FAST_ADV);
-  // wait for a few ms for the 2nd core to start advertising
-  HAL_Delay(10);
-  // stop advertising
-  Adv_Cancel();
-  // wait for 1ms for the 2nd core to stop advertising
-  HAL_Delay(1);
-  // turn off LED
-//   HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
+  current_adv_type = get_adv_type_from_order();
+  perform_advertising_cycle(current_adv_type, true);
+  advance_adv_order();
 
-  // increment key index for next time
-  if (cycle >= REUSE_CYCLES){
-    key_index = (key_index + 1) % key_count; // Back to zero if out of range
-    cycle = 0;
-  }else{
-    cycle++;
-  }
+  #ifdef ENABLE_ADV_LED_DEBUG
+    // turn off LED
+    HAL_GPIO_WritePin(LED_PIN_GPIO_Port, LED_PIN_Pin, GPIO_PIN_RESET);
+  #endif
 
   // go back into deep sleep
   for(int i = 0; i < SLEEP_CYCLES; i++){
@@ -791,26 +1050,55 @@ void Send_Out_Adv(void){
     //////// DEEP SLEEP END  
   }
   
-  
   UTIL_SEQ_SetTask((1 << 9), CFG_SCH_PRIO_0);
 }
 
-void set_payload_from_key(uint8_t *payload, uint8_t *public_key)
+void set_payload_from_key(uint8_t *payload, uint8_t *public_key, adv_type_t type)
 {
-  /* copy last 22 bytes */
-  memcpy(&payload[7], &public_key[6], 22);
-  /* append two bits of public key */
-  payload[29] = public_key[0] >> 6;
+  if(type == APPLE){
+    // Copy template into payload
+    memcpy(payload, apple_adv_data_template, sizeof(apple_adv_data_template));
+
+    // copy the key into the payload
+    // last 22 bytes
+    memcpy(&payload[7], &public_key[6], 22);
+    // append two bits of public key
+    payload[29] = public_key[0] >> 6;
+  }else if(type == GOOGLE){
+    // Copy template into payload
+    memcpy(payload, google_adv_data_template, sizeof(google_adv_data_template));
+    // copy 20-byte public key into payload
+    memcpy(&payload[8], public_key, GOOGLE_EID_LEN_BYTES);
+  }
 }
 
-void set_addr_from_key(uint8_t *addr, uint8_t *public_key)
+void set_addr_from_key(uint8_t *addr, uint8_t *public_key, adv_type_t type)
 {
-  addr[5] = public_key[0] | 0b11000000;
-  addr[4] = public_key[1];
-  addr[3] = public_key[2];
-  addr[2] = public_key[3];
-  addr[1] = public_key[4];
-  addr[0] = public_key[5];
+  if(type == APPLE){
+    addr[5] = public_key[0] | 0b11000000;
+    addr[4] = public_key[1];
+    addr[3] = public_key[2];
+    addr[2] = public_key[3];
+    addr[1] = public_key[4];
+    addr[0] = public_key[5];
+  }else if(type == GOOGLE){
+    for (int i = 0; i < 6; i++) {
+      uint8_t rng_byte = HAL_GetTick() % 256; // not cryptographically secure, but it's mixed with the key so it's fine
+      addr[i] = public_key[i] ^ rng_byte; // XOR with a byte from the key to add some variability, since Google allows us to set the MAC to be random
+    }
+    // static random bits per: https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/Core-54/out/en/low-energy-controller/link-layer-specification.html
+    addr[5] |= 0b11000000; // set the two most significant bits to 1 to indicate that this is a static random address
+  }
+}
+
+adv_type_t get_adv_type_from_order(void)
+{
+  return adv_order[adv_order_index];
+}
+
+void advance_adv_order(void)
+{
+  adv_order_index = (adv_order_index + 1) % ADV_ORDER_LEN;
 }
 
 static void load_bytes_from_partition(uint8_t *dst, size_t size, uint32_t address) {
