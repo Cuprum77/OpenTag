@@ -1,5 +1,3 @@
----
-
 # Software Overview
 
 *TODO*
