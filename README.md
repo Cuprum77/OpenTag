@@ -10,21 +10,21 @@ We did not invent or even do anything novel in terms of reverse engineering the 
 ## Hardware
 The hardware design (located in the [hardware](./hardware) directory) for the Polyglot tag is based on the STM32WB5x/35xx series of microcontrollers and is powered with a single CR2032 battery. When actively advertising payloads it consumes around 3mA, in deep sleep that number drops to 3uA. By default the tag wakes up every 10 seconds for a ~25ms long advertising window and with a single 230mAh CR2032 cell the tag is expected to last for about 2 years and 6 months. The parameters can be adjusted for different use cases and battery life tradeoffs. The following formula can be used to estimate battery lifetime:
 
-$
+$$
 I_{\mathrm{avg}}=
 I_{\mathrm{active}}\cdot\frac{t_{\mathrm{active}}}{T_{\mathrm{cycle}}}
 +
 I_{\mathrm{sleep}}\cdot\left(1-\frac{t_{\mathrm{active}}}{T_{\mathrm{cycle}}}\right)
-$
+$$
 
-$
+$$
 \text{Battery Life (years)} =
 \frac{C_{\mathrm{bat}}}{I_{\mathrm{avg}}\cdot 24 \cdot 365}
-$
+$$
 
 or equivalently
 
-$
+$$
 \text{Battery Life (years)} =
 \frac{C_{\mathrm{bat}}}
 {\left(
@@ -32,29 +32,29 @@ I_{\mathrm{active}}\cdot\frac{t_{\mathrm{active}}}{T_{\mathrm{cycle}}}
 +
 I_{\mathrm{sleep}}\cdot\left(1-\frac{t_{\mathrm{active}}}{T_{\mathrm{cycle}}}\right)
 \right)\cdot 24 \cdot 365}
-$
+$$
 
 Where by default the parameters are:
 
-$
+$$
 I_{\mathrm{active}} = 3.0\ \text{mA}
-$
+$$
 
-$
+$$
 I_{\mathrm{sleep}} = 0.003\ \text{mA}
-$
+$$
 
-$
+$$
 t_{\mathrm{active}} = 24\ \text{ms}
-$
+$$
 
-$
+$$
 T_{\mathrm{cycle}} = 10\ \text{s}
-$
+$$
 
-$
+$$
 C_{\mathrm{bat}} = 230\ \text{mAh}
-$
+$$
 
 There is also a large capacitor bank on the board, it is optional, however it contains enough energy for a few advertisement bursts which can prevent the tag from resetting in high vibration environments.
 
@@ -72,6 +72,7 @@ The [3d_models](./3d_models) directory contains the 3D models for the tag itself
 *TODO*
 
 # Disclaimer
-This project is provided for educational and research purposes only. The authors and contributors disclaim liability and do not condone illegal, unauthorized, or unethical use, including unauthorized tracking or invasions of privacy.
-
-Use of this project is entirely at your own risk. Interacting with Google or Apple location networks in undocumented or unsupported ways may violate platform rules or terms of service and may result in account penalties, service restrictions, or other consequences. The authors and contributors disclaim liability for misuse of this repository and for any damages or consequences resulting from its use.
+> [!CAUTION]
+> This project is provided for educational and research purposes only. The authors and contributors disclaim liability and do not condone illegal, unauthorized, or unethical use, including unauthorized tracking or invasions of privacy.
+> 
+> Use of this project is entirely at your own risk. Interacting with Google or Apple location networks in undocumented or unsupported ways may violate platform rules or terms of service and may result in account penalties, service restrictions, or other consequences. The authors and contributors disclaim liability for misuse of this repository and for any damages or consequences resulting from its use.
