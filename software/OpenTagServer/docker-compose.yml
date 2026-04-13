@@ -1,0 +1,33 @@
+services:
+  opentag-server:
+    build: .
+    # restart: unless-stopped
+    restart: no
+    container_name: opentag-server
+    ports:
+      - 8888:8080
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./src:/usr/bot/src
+      - ./data:/usr/bot/data
+    command: >-
+      gunicorn --chdir ./src --bind 0.0.0.0:8080 --workers 2 --threads 4 --timeout 90 main:app
+    depends_on:
+      - valkey
+
+  valkey:
+    container_name: opentag-server-db
+    image: "valkey/valkey:latest"
+    restart: unless-stopped
+    # Not need to expose Redis port to the host machine
+    # as the bot service can access it directly via Docker network
+    # ports:
+    #   - 6379:6379
+    volumes:
+      - ./db/valkey:/data
+    networks:
+      default:
+        aliases:
+          - db
+    entrypoint: valkey-server --appendonly yes --bind 0.0.0.0 --protected-mode no

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenTag Server Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>OpenTag Server</h1>
+    <div class="topbar-right">
+      <div class="user">Signed in as <strong id="username">{{ username }}</strong></div>
+      <form method="post" action="/auth/logout" class="signout-form">
+        <button type="submit" class="signout-btn">Sign Out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="map-area">
+      <div class="map-toolbar">
+        <button id="reload-history">Reload Combined History</button>
+      </div>
+      <div id="map"></div>
+    </section>
+
+    <section class="panel-area">
+      <details open>
+        <summary>Keyfiles</summary>
+        <div class="panel-content">
+          <form id="upload-accessories-form">
+            <label>Upload accessories.json</label>
+            <input type="file" id="accessories-file" accept="application/json,.json" required>
+            <button type="submit">Upload Apple File</button>
+          </form>
+
+          <form id="upload-secrets-form">
+            <label>Upload secrets.json</label>
+            <input type="file" id="secrets-file" accept="application/json,.json" required>
+            <button type="submit" id="upload-secrets-btn">Upload Google File</button>
+          </form>
+          <p id="google-upload-hint" class="hint"></p>
+
+          <button id="refresh-files">Refresh Files</button>
+          <p id="files-feedback" class="hint"></p>
+          <div id="files-list" class="file-list"></div>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Tags</summary>
+        <div class="panel-content">
+          <button id="refresh-tags">Refresh Tags</button>
+          <pre id="tags-output"></pre>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Actions</summary>
+        <div class="panel-content">
+          <button id="apple-fetch">Force Refresh Apple Locations</button>
+          <button id="google-targets">List Google Targets</button>
+          <button id="google-refresh-keys">Refresh Google Keys</button>
+
+          <form id="google-fetch-form">
+            <label for="google-canonic-id">Canonic ID (or leave empty and use Compound Name)</label>
+            <input id="google-canonic-id" type="text" placeholder="69d6...">
+
+            <label for="google-compound-name">Compound Name</label>
+            <input id="google-compound-name" type="text" placeholder="keychain">
+
+            <button type="submit">Fetch Google Location</button>
+          </form>
+
+          <pre id="apple-output"></pre>
+          <pre id="google-output"></pre>
+        </div>
+      </details>
+
+      <details open>
+        <summary>System Alerts</summary>
+        <div class="panel-content">
+          <p class="hint">Apple key merge now runs in the background. This panel only shows errors.</p>
+          <button id="refresh-errors">Refresh Alerts</button>
+          <pre id="errors-output"></pre>
+        </div>
+      </details>
+
+      <details>
+        <summary>Fetch Status</summary>
+        <div class="panel-content">
+          <button id="refresh-status">Refresh Fetch Status</button>
+          <pre id="status-output"></pre>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Combined History</summary>
+        <div class="panel-content">
+          <pre id="history-output"></pre>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

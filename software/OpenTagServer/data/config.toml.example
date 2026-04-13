@@ -1,0 +1,20 @@
+# General config of the OpenTagServer
+[config]
+haystack_endpoint = "http://100.100.100.100:6176"  # The endpoint of your Macless Haystack server
+haystack_login = ""                                 # The login to use to connect to the Haystack server, leave empty if no authentication is required
+haystack_password = ""                              # The password to use to connect to the Haystack, leave empty if no authentication is required
+local_history = "True"                              # Whether to store a local history of the tags in our own database.
+google_auto_query_interval_min = 60                 # The interval in minutes between automatic queries to Google to update the history. Set to 0 to disable, automatically disabled if local_history is False.
+appple_auto_query_interval_min = 600                # Same as above but for Apple, (Apple stores 7 days of history so can be much less frequent). Set to 0 to disable, automatically disabled if local_history is False. 
+history_retention_days = 30                         # The number of days to keep the history in the local database, set to 0 to keep forever, automatically disabled if local_history is False.
+
+# User config
+[users.admin]                           # users.admin -> username: admin
+password_hash = "$6$.mDwv..."           # Password generated with `openssl passwd -6`
+role = "admin"                          # User role, can be "admin" or "user", admins can do admin things, users can only query the locations and view their own history
+
+[users.user1]                           # users.user1 -> username: user1
+password_hash = "$6$.mDwv..."           # Password generated with `openssl passwd -6`           
+role = "user"                           # User can query their own history and view their own locations
+
+# More users can be added using the same pattern
