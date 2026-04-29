@@ -1,4 +1,6 @@
 import time
+import logging
+
 from threading import Thread
 
 from flask import Blueprint, current_app, g, jsonify, request
@@ -24,6 +26,7 @@ from storage import (
     user_secrets_path,
 )
 
+logger = logging.getLogger(__name__)
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -142,7 +145,9 @@ def _extract_apple_events(payload):
 @api_bp.get("/keyfiles")
 @login_required
 def keyfiles_list():
-    return jsonify({"files": list_user_files(g.user["username"])})
+    files = list_user_files(g.user["username"])
+    logger.info("Listing %d keyfiles for user %s", len(files), g.user["username"])
+    return jsonify({"files": files})
 
 
 @api_bp.post("/upload/accessories")
@@ -155,8 +160,10 @@ def upload_accessories():
     try:
         result = save_accessories_upload(g.user["username"], file_obj)
     except Exception as exc:
+        logger.error("Failed to upload accessories for user %s: %s", g.user["username"], exc)
         return jsonify({"error": str(exc)}), 400
 
+    logger.info("Uploaded accessories file %s for user %s (%d items)", result.get("filename", ""), g.user["username"], result.get("items", 0))
     _spawn_merge_status_job(current_app.config["REDIS"], g.user["username"])
 
     return jsonify({"ok": True, "saved": result})
@@ -170,8 +177,10 @@ def keyfiles_delete(filename):
     try:
         deleted = delete_user_file(username, filename)
     except FileNotFoundError:
+        logger.warning("Delete failed: file %s not found for user %s", filename, username)
         return jsonify({"error": "file not found"}), 404
     except Exception as exc:
+        logger.error("Failed to delete file %s for user %s: %s", filename, username, exc)
         return jsonify({"error": str(exc)}), 400
 
     removed_events = 0
@@ -179,9 +188,11 @@ def keyfiles_delete(filename):
         removed_events = purge_history_events(redis_client, username, provider="apple", source_file=filename)
         clear_fetch_status(redis_client, username, "apple")
         _spawn_merge_status_job(redis_client, username)
+        logger.info("Deleted accessories %s for user %s, purged %d apple history events", filename, username, removed_events)
     elif deleted.get("category") == "secrets":
         removed_events = purge_history_events(redis_client, username, provider="google")
         clear_fetch_status(redis_client, username, "google")
+        logger.info("Deleted secrets %s for user %s, purged %d google history events", filename, username, removed_events)
 
     return jsonify({"ok": True, "deleted": deleted, "cache": {"removed_events": removed_events}})
 
@@ -196,8 +207,10 @@ def upload_secrets():
     try:
         result = save_secrets_upload(g.user["username"], file_obj)
     except Exception as exc:
+        logger.error("Failed to upload secrets for user %s: %s", g.user["username"], exc)
         return jsonify({"error": str(exc)}), 400
 
+    logger.info("Uploaded secrets.json for user %s", g.user["username"])
     return jsonify({"ok": True, "saved": result})
 
 
@@ -278,9 +291,11 @@ def google_targets():
         return jsonify({"error": "secrets.json is required"}), 400
 
     try:
+        logger.info("Listing Google targets for user %s", username)
         payload = list_google_targets(path)
         return jsonify(payload)
     except Exception as exc:
+        logger.error("Failed to list Google targets for user %s: %s", username, exc)
         return jsonify({"error": str(exc)}), 400
 
 
@@ -297,6 +312,7 @@ def google_refresh_keys():
     redis_client = current_app.config["REDIS"]
 
     try:
+        logger.info("Refreshing Google keys for user %s (force=%s)", username, force_upload)
         payload = refresh_google_announcements(path, force_upload=force_upload)
         status_payload = {
             "provider": "google",
@@ -306,6 +322,7 @@ def google_refresh_keys():
             "details": payload,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
+        logger.info("Google key refresh successful for user %s", username)
         return jsonify(status_payload)
     except Exception as exc:
         previous = get_fetch_status(redis_client, username, "google")
@@ -318,6 +335,7 @@ def google_refresh_keys():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
+        logger.error("Google key refresh failed for user %s: %s", username, exc)
         return jsonify(status_payload), 502
 
 
@@ -339,6 +357,8 @@ def google_fetch():
 
     redis_client = current_app.config["REDIS"]
     try:
+        target = canonic_id or compound_name
+        logger.info("Fetching Google location for user %s, target=%s", username, target)
         payload = fetch_google_locations(
             path,
             canonic_id=canonic_id,
@@ -350,11 +370,12 @@ def google_fetch():
             "ok": True,
             "kind": "fetch_location",
             "timestamp_unix": int(time.time()),
-            "target": canonic_id or compound_name,
+            "target": target,
             "details": payload,
         }
-        set_fetch_status(redis_client, username, "google", status_payload)
-        append_history_events(redis_client, username, _extract_google_events(status_payload))
+        events = _extract_google_events(status_payload)
+        append_history_events(redis_client, username, events)
+        logger.info("Google location fetch successful for user %s, target=%s, stored %d events", username, target, len(events))
         return jsonify(status_payload)
     except Exception as exc:
         previous = get_fetch_status(redis_client, username, "google")
@@ -368,6 +389,7 @@ def google_fetch():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
+        logger.error("Google location fetch failed for user %s, target=%s: %s", username, canonic_id or compound_name, exc)
         return jsonify(status_payload), 502
 
 
@@ -387,6 +409,7 @@ def apple_fetch():
     redis_client = current_app.config["REDIS"]
 
     try:
+        logger.info("Fetching Apple locations for user %s, days=%d", username, days)
         payload = fetch_apple_locations(runtime.get("haystack", {}), accessories, days=days, timeout=timeout)
         status_payload = {
             "provider": "apple",
@@ -396,7 +419,9 @@ def apple_fetch():
             "details": payload,
         }
         set_fetch_status(redis_client, username, "apple", status_payload)
-        append_history_events(redis_client, username, _extract_apple_events(status_payload))
+        events = _extract_apple_events(status_payload)
+        append_history_events(redis_client, username, events)
+        logger.info("Apple location fetch successful for user %s, stored %d events", username, len(events))
         return jsonify(status_payload)
     except Exception as exc:
         previous = get_fetch_status(redis_client, username, "apple")
@@ -409,6 +434,7 @@ def apple_fetch():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "apple", status_payload)
+        logger.error("Apple location fetch failed for user %s: %s", username, exc)
         return jsonify(status_payload), 502
 
 

@@ -18,90 +18,150 @@
     </div>
   </header>
 
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="keys">Keys</button>
+    <button class="tab-btn" data-tab="debug">Debug</button>
+  </nav>
+
   <main class="layout">
-    <section class="map-area">
-      <div class="map-toolbar">
-        <button id="reload-history">Reload Combined History</button>
+    <!-- OVERVIEW TAB -->
+    <section class="tab-content active" id="tab-overview">
+      <div class="overview-grid">
+        <div class="map-area">
+          <div class="map-toolbar">
+            <button id="reload-history">Reload History</button>
+          </div>
+          <div id="map"></div>
+        </div>
+
+        <div class="sidebar">
+          <div class="card">
+            <h2>Tags</h2>
+            <div id="tags-container" class="tags-container">
+              <p class="hint">Tags will appear here after the first refresh.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Actions</h2>
+            <p id="google-targets-feedback" class="hint"></p>
+            <form id="google-fetch-form" onsubmit="return false;">
+              <label for="apple-accessory-select">Apple accessories</label>
+              <select id="apple-accessory-select" multiple size="4">
+                <option value="">Select an Apple accessory</option>
+              </select>
+
+              <label for="google-compound-name">Google compound trackers</label>
+              <select id="google-compound-name" multiple size="5">
+                <option value="">Select a compound tracker</option>
+              </select>
+
+              <label for="google-canonic-id">Google non-compound trackers</label>
+              <select id="google-canonic-id" multiple size="6">
+                <option value="">Select a tracker</option>
+              </select>
+
+              <label class="debug-toggle" style="margin: 6px 0 10px;">
+                <input type="checkbox" id="google-expand-compounds">
+                <span>Include compound pieces in the non-compound list</span>
+              </label>
+
+              <button type="button" id="fetch-selected-btn">Fetch All Selected</button>
+              <button type="button" id="refresh-keys-selected-btn">Refresh Google Keys For Selected</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>Status</h2>
+            <div id="status-container" class="status-container">
+              <p class="hint">Status will appear here after the first refresh.</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Alerts</h2>
+            <div id="errors-container" class="errors-container">
+              <p class="hint">No errors</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <div id="map"></div>
     </section>
 
-    <section class="panel-area">
-      <details open>
-        <summary>Keyfiles</summary>
-        <div class="panel-content">
+    <!-- KEYS TAB -->
+    <section class="tab-content" id="tab-keys">
+      <div class="keys-layout">
+        <div class="card">
+          <h2>Upload Apple Accessories</h2>
           <form id="upload-accessories-form">
             <label>Upload accessories.json</label>
             <input type="file" id="accessories-file" accept="application/json,.json" required>
             <button type="submit">Upload Apple File</button>
           </form>
+        </div>
 
+        <div class="card">
+          <h2>Upload Google Secrets</h2>
           <form id="upload-secrets-form">
             <label>Upload secrets.json</label>
             <input type="file" id="secrets-file" accept="application/json,.json" required>
             <button type="submit" id="upload-secrets-btn">Upload Google File</button>
           </form>
           <p id="google-upload-hint" class="hint"></p>
+        </div>
 
+        <div class="card">
+          <h2>Keyfiles</h2>
           <button id="refresh-files">Refresh Files</button>
           <p id="files-feedback" class="hint"></p>
           <div id="files-list" class="file-list"></div>
         </div>
-      </details>
+      </div>
+    </section>
 
-      <details open>
-        <summary>Tags</summary>
-        <div class="panel-content">
-          <button id="refresh-tags">Refresh Tags</button>
+    <!-- DEBUG TAB -->
+    <section class="tab-content" id="tab-debug">
+      <div class="debug-layout">
+        <div class="card">
+          <h2>Debug Mode</h2>
+          <label class="debug-toggle">
+            <input type="checkbox" id="debug-mode-toggle">
+            <span>Show raw JSON output</span>
+          </label>
+          <p class="hint">When enabled, raw JSON responses from all API endpoints will be displayed below.</p>
+        </div>
+
+        <div class="card debug-panel" id="debug-tags-panel" style="display:none">
+          <h2>Tags (Raw JSON)</h2>
           <pre id="tags-output"></pre>
         </div>
-      </details>
 
-      <details open>
-        <summary>Actions</summary>
-        <div class="panel-content">
-          <button id="apple-fetch">Force Refresh Apple Locations</button>
-          <button id="google-targets">List Google Targets</button>
-          <button id="google-refresh-keys">Refresh Google Keys</button>
-
-          <form id="google-fetch-form">
-            <label for="google-canonic-id">Canonic ID (or leave empty and use Compound Name)</label>
-            <input id="google-canonic-id" type="text" placeholder="69d6...">
-
-            <label for="google-compound-name">Compound Name</label>
-            <input id="google-compound-name" type="text" placeholder="keychain">
-
-            <button type="submit">Fetch Google Location</button>
-          </form>
-
-          <pre id="apple-output"></pre>
-          <pre id="google-output"></pre>
-        </div>
-      </details>
-
-      <details open>
-        <summary>System Alerts</summary>
-        <div class="panel-content">
-          <p class="hint">Apple key merge now runs in the background. This panel only shows errors.</p>
-          <button id="refresh-errors">Refresh Alerts</button>
-          <pre id="errors-output"></pre>
-        </div>
-      </details>
-
-      <details>
-        <summary>Fetch Status</summary>
-        <div class="panel-content">
-          <button id="refresh-status">Refresh Fetch Status</button>
+        <div class="card debug-panel" id="debug-status-panel" style="display:none">
+          <h2>Fetch Status (Raw JSON)</h2>
           <pre id="status-output"></pre>
         </div>
-      </details>
 
-      <details open>
-        <summary>Combined History</summary>
-        <div class="panel-content">
+        <div class="card debug-panel" id="debug-errors-panel" style="display:none">
+          <h2>Errors (Raw JSON)</h2>
+          <pre id="errors-output"></pre>
+        </div>
+
+        <div class="card debug-panel" id="debug-history-panel" style="display:none">
+          <h2>Combined History (Raw JSON)</h2>
           <pre id="history-output"></pre>
         </div>
-      </details>
+
+        <div class="card debug-panel" id="debug-apple-panel" style="display:none">
+          <h2>Apple Fetch (Raw JSON)</h2>
+          <pre id="apple-output"></pre>
+        </div>
+
+        <div class="card debug-panel" id="debug-google-panel" style="display:none">
+          <h2>Google Fetch (Raw JSON)</h2>
+          <pre id="google-output"></pre>
+        </div>
+      </div>
     </section>
   </main>
 

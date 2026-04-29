@@ -6,7 +6,9 @@ haystack_password = ""                              # The password to use to con
 local_history = "True"                              # Whether to store a local history of the tags in our own database.
 google_auto_query_interval_min = 60                 # The interval in minutes between automatic queries to Google to update the history. Set to 0 to disable, automatically disabled if local_history is False.
 appple_auto_query_interval_min = 600                # Same as above but for Apple, (Apple stores 7 days of history so can be much less frequent). Set to 0 to disable, automatically disabled if local_history is False. 
+google_key_refresh_interval_hours = 24              # How often (in hours) to re-upload Google announcement keys. Set to 0 to disable.
 history_retention_days = 30                         # The number of days to keep the history in the local database, set to 0 to keep forever, automatically disabled if local_history is False.
+log_level = "INFO"                                  # Logging level for Docker console: DEBUG, INFO, WARNING, ERROR
 
 # User config
 [users.admin]                           # users.admin -> username: admin

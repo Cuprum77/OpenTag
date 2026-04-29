@@ -45,7 +45,9 @@ def load_runtime_config():
         "local_history": _to_bool(cfg.get("local_history", True), default=True),
         "google_auto_query_interval_min": _to_int(cfg.get("google_auto_query_interval_min", 60), default=60),
         "apple_auto_query_interval_min": _to_int(cfg.get("appple_auto_query_interval_min", 600), default=600),
+        "google_key_refresh_interval_hours": _to_int(cfg.get("google_key_refresh_interval_hours", 24), default=24),
         "history_retention_days": _to_int(cfg.get("history_retention_days", 30), default=30),
+        "log_level": os.environ.get("OPENTAG_LOG_LEVEL", cfg.get("log_level", "INFO")).upper(),
         "secret_key": os.environ.get("OPENTAG_SECRET_KEY", secrets.token_urlsafe(48)),
     }
 

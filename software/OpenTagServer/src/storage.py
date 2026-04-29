@@ -353,3 +353,40 @@ def purge_history_events(redis_client, username, provider=None, source_file=None
         pipe.rpush(key, *kept)
     pipe.execute()
     return removed
+
+
+def purge_old_history_events(redis_client, username, max_age_seconds):
+    """Remove history events older than max_age_seconds. Returns count of removed events."""
+    if max_age_seconds <= 0:
+        return 0
+
+    key = f"user:{username}:history:events"
+    raw_rows = redis_client.lrange(key, 0, -1)
+    if not raw_rows:
+        return 0
+
+    cutoff = time.time() - max_age_seconds
+    kept = []
+    removed = 0
+
+    for raw in raw_rows:
+        try:
+            row = json.loads(raw)
+        except Exception:
+            continue
+
+        ts = row.get("timestamp_unix", 0)
+        if ts and ts < cutoff:
+            removed += 1
+        else:
+            kept.append(raw)
+
+    if removed == 0:
+        return 0
+
+    pipe = redis_client.pipeline()
+    pipe.delete(key)
+    if kept:
+        pipe.rpush(key, *kept)
+    pipe.execute()
+    return removed
