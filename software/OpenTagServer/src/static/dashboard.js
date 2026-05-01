@@ -1,3 +1,33 @@
+// ── Theme / Dark Mode ──
+function initDarkMode() {
+  const toggle = document.getElementById('theme-toggle');
+  const loginToggle = document.getElementById('login-theme-toggle');
+  const isDark = localStorage.getItem('opentag_dark') === 'true';
+
+  if (isDark) {
+    document.body.classList.add('dark');
+  }
+
+  function updateIcon(dark) {
+    const btn = toggle || loginToggle;
+    if (btn) btn.textContent = dark ? '☀️' : '🌙';
+  }
+  updateIcon(isDark);
+
+  function toggleTheme() {
+    const nowDark = !document.body.classList.contains('dark');
+    document.body.classList.toggle('dark', nowDark);
+    localStorage.setItem('opentag_dark', nowDark);
+    updateIcon(nowDark);
+  }
+
+  if (toggle) toggle.addEventListener('click', toggleTheme);
+  if (loginToggle) loginToggle.addEventListener('click', toggleTheme);
+}
+
+// Initialize dark mode immediately (before DOMContentLoaded so it applies before paint)
+initDarkMode();
+
 // ── Tab switching ──
 let map = null;
 let markerLayer = null;
@@ -648,6 +678,8 @@ function initDashboard() {
   }
 
   initMap();
+  // Invalidate map size after layout settles (flexbox map container)
+  setTimeout(() => { if (map) map.invalidateSize(); }, 100);
 
   refreshFiles();
   refreshTags();

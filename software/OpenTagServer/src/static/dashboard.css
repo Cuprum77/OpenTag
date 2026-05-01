@@ -7,6 +7,62 @@
   --success: #18a96b;
   --warning: #e6a817;
   --error: #d44;
+  --bg-card: #f8fbf6;
+  --bg-tag: #fdfefb;
+  --bg-status: #fdfefb;
+  --bg-file: #fdfefb;
+  --bg-pre: #f7f8f4;
+  --bg-topbar: linear-gradient(120deg, #ffffff 0%, #e9f2ed 100%);
+  --bg-tabbar: #e8f0e7;
+  --bg-error: #faece9;
+  --bg-error-text: #7a261a;
+  --bg-login-card: #ffffff;
+  --border-login: #d5ddcd;
+  --text-muted: #4c6264;
+  --text-hint: #41565a;
+  --text-error: #9a2f2f;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-map: 0 8px 18px rgba(0, 0, 0, 0.07);
+  --shadow-topbar: 0 3px 10px rgba(0, 0, 0, 0.05);
+  --tab-hover: rgba(15, 107, 109, 0.08);
+  --tab-active: rgba(15, 107, 109, 0.05);
+  --btn-delete-hover: #8e3a24;
+  --btn-signout-hover: #7f2d24;
+  --btn-hover: #0f584f;
+}
+
+/* ── Dark Mode Variables ── */
+body.dark {
+  --ink: #dce4de;
+  --paper: #1a1f1a;
+  --accent: #3dd9db;
+  --accent-2: #e07a5f;
+  --line: #3a4a3e;
+  --success: #2dd98a;
+  --warning: #f0c05a;
+  --error: #f07070;
+  --bg-card: #1e241e;
+  --bg-tag: #242b24;
+  --bg-status: #242b24;
+  --bg-file: #242b24;
+  --bg-pre: #1e241e;
+  --bg-topbar: linear-gradient(120deg, #161a14 0%, #1e241e 100%);
+  --bg-tabbar: #1e241e;
+  --bg-error: #2a1a1a;
+  --bg-error-text: #f0a090;
+  --bg-login-card: #1e241e;
+  --border-login: #3a4a3e;
+  --text-muted: #8a9a8e;
+  --text-hint: #8a9a8e;
+  --text-error: #f0a090;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-map: 0 8px 18px rgba(0, 0, 0, 0.4);
+  --shadow-topbar: 0 3px 10px rgba(0, 0, 0, 0.3);
+  --tab-hover: rgba(61, 217, 219, 0.1);
+  --tab-active: rgba(61, 217, 219, 0.06);
+  --btn-delete-hover: #c06040;
+  --btn-signout-hover: #c05040;
+  --btn-hover: #2ab8ba;
 }
 
 * {
@@ -18,6 +74,13 @@ body {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background: radial-gradient(circle at 15% -10%, #ffffff 0%, #edf3ec 45%, #dde8df 100%);
+  transition: background 0.25s, color 0.25s;
+  overflow: hidden;
+  height: 100%;
+}
+
+body.dark {
+  background: radial-gradient(circle at 15% -10%, #0d100d 0%, #161a14 45%, #1e241e 100%);
 }
 
 .topbar {
@@ -26,8 +89,9 @@ body {
   align-items: center;
   padding: 10px 16px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(120deg, #ffffff 0%, #e9f2ed 100%);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+  background: var(--bg-topbar);
+  box-shadow: var(--shadow-topbar);
+  transition: background 0.25s, box-shadow 0.25s;
 }
 
 .topbar h1 {
@@ -51,16 +115,53 @@ body {
 }
 
 .signout-btn:hover {
-  background: #7f2d24;
+  background: var(--btn-signout-hover);
+}
+
+/* ── Dark mode signout button override ── */
+body.dark .signout-btn {
+  background: #8b3028;
+}
+
+/* ── Dark mode signout hover ── */
+body.dark .signout-btn:hover {
+  background: #a83a30;
+}
+
+/* ── Dark mode button hover ── */
+body.dark button:not(.signout-btn):not(.delete-btn):not([class*="loading"]) {
+  /* handled by var(--accent) in button rule */
+}
+
+/* THEME TOGGLE BUTTON */
+.theme-toggle-btn {
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+  padding: 6px 10px !important;
+  font-size: 16px !important;
+  cursor: pointer;
+  border-radius: 6px !important;
+  transition: background 0.2s, border-color 0.2s !important;
+  box-shadow: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--tab-hover) !important;
+  border-color: var(--accent) !important;
 }
 
 /* TAB BAR */
 .tab-bar {
   display: flex;
   gap: 0;
-  background: #e8f0e7;
+  background: var(--bg-tabbar);
   border-bottom: 1px solid var(--line);
   padding: 0 16px;
+  transition: background 0.25s;
 }
 
 .tab-btn {
@@ -73,17 +174,32 @@ body {
   font-weight: 500;
   font-size: 14px;
   border-radius: 0;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
 }
 
 .tab-btn:hover {
-  background: rgba(15, 107, 109, 0.08);
+  background: var(--tab-hover);
 }
 
 .tab-btn.active {
   border-bottom-color: var(--accent);
   font-weight: 600;
-  background: rgba(15, 107, 109, 0.05);
+  background: var(--tab-active);
+}
+
+/* ── Dark mode tab buttons: ensure text is visible on dark tab bar ── */
+body.dark .tab-btn {
+  color: #b0c4b8;
+}
+
+body.dark .tab-btn:hover {
+  color: #dce4de;
+  background: rgba(61, 217, 219, 0.08);
+}
+
+body.dark .tab-btn.active {
+  color: #3dd9db;
+  background: rgba(61, 217, 219, 0.1);
 }
 
 /* TAB CONTENT */
@@ -97,32 +213,82 @@ body {
 
 /* LAYOUT */
 .layout {
-  min-height: calc(100vh - 100px);
+  min-height: 100vh;
+  padding-top: 0;
 }
 
+/* ── Overview grid: map + sidebar fill the viewport ── */
 .overview-grid {
   display: grid;
   grid-template-columns: 1.25fr 0.75fr;
-  min-height: calc(100vh - 100px);
+  height: calc(100vh - 52px - 45px); /* subtract topbar (~52px) + tabbar (~45px) */
+  min-height: 0;
 }
 
 .map-area {
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .map-toolbar {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 8px;
+  flex-shrink: 0;
 }
 
 #map {
   width: 100%;
-  height: calc(100vh - 180px);
+  flex: 1 1 0;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.07);
+  box-shadow: var(--shadow-map);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+/* ── Dark mode map container ── */
+body.dark #map {
+  background: #1a1f1a;
+}
+
+/* ── Dark mode Leaflet tile inversion ── */
+body.dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+}
+
+body.dark .leaflet-control-zoom a {
+  color: #dce4de;
+  background: #1e241e;
+  border-color: #3a4a3e;
+}
+
+body.dark .leaflet-control-zoom a:hover {
+  background: #242b24;
+}
+
+body.dark .leaflet-control-attribution {
+  background: #1e241eee;
+  color: #8a9a8e;
+}
+
+body.dark .leaflet-popup-content-wrapper {
+  background: #1e241e;
+  color: #dce4de;
+  border-radius: 8px;
+}
+
+body.dark .leaflet-popup-tip {
+  background: #1e241e;
+}
+
+body.dark .leaflet-popup-close-button {
+  color: #8a9a8e;
 }
 
 .sidebar {
@@ -132,15 +298,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: border-color 0.25s;
 }
 
 /* CARDS */
 .card {
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f8fbf6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
   padding: 14px;
+  transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
 }
 
 .card h2 {
@@ -161,7 +329,8 @@ body {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 10px;
-  background: #fdfefb;
+  background: var(--bg-tag);
+  transition: background 0.25s, border-color 0.25s;
 }
 
 .tag-card .tag-name {
@@ -171,8 +340,9 @@ body {
 
 .tag-card .tag-meta {
   font-size: 12px;
-  color: #4c6264;
+  color: var(--text-muted);
   margin-top: 2px;
+  transition: color 0.25s;
 }
 
 .tag-card.apple {
@@ -197,8 +367,9 @@ body {
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 13px;
-  background: #fdfefb;
+  background: var(--bg-status);
   border: 1px solid var(--line);
+  transition: background 0.25s, border-color 0.25s;
 }
 
 .status-badge .status-dot {
@@ -217,7 +388,7 @@ body {
 }
 
 .status-badge .status-dot.none {
-  background: #aaa;
+  background: #888;
 }
 
 .status-badge .status-label {
@@ -227,7 +398,8 @@ body {
 .status-badge .status-time {
   margin-left: auto;
   font-size: 11px;
-  color: #4c6264;
+  color: var(--text-muted);
+  transition: color 0.25s;
 }
 
 /* ERRORS */
@@ -241,9 +413,15 @@ body {
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 12px;
-  background: #faece9;
-  border: 1px solid #e0afa9;
-  color: #7a261a;
+  background: var(--bg-error);
+  border: 1px solid #5a3030;
+  color: var(--bg-error-text);
+  transition: background 0.25s, color 0.25s;
+}
+
+/* ── Dark mode error border ── */
+body.dark .error-item {
+  border-color: #6a3535;
 }
 
 /* KEYS LAYOUT */
@@ -284,10 +462,37 @@ button {
   color: white;
   cursor: pointer;
   font-size: 13px;
+  transition: background 0.2s;
 }
 
 button:hover {
-  background: #0f584f;
+  background: var(--btn-hover);
+}
+
+/* ── Dark mode button text readability ── */
+body.dark button {
+  color: #0d100d;
+  font-weight: 600;
+}
+
+body.dark button:hover {
+  color: #0d100d;
+}
+
+body.dark .signout-btn {
+  color: #fff;
+}
+
+body.dark .signout-btn:hover {
+  color: #fff;
+}
+
+body.dark .delete-btn {
+  color: #fff;
+}
+
+body.dark .delete-btn:hover {
+  color: #fff;
 }
 
 button:disabled,
@@ -322,6 +527,14 @@ select {
   border: 1px solid var(--line);
   margin-bottom: 8px;
   font-size: 13px;
+  background: var(--bg-card);
+  color: var(--ink);
+  transition: background 0.25s, color 0.25s, border-color 0.25s;
+}
+
+/* ── Dark mode select dropdown option text ── */
+body.dark select {
+  color-scheme: dark;
 }
 
 /* PRE / JSON OUTPUT */
@@ -331,16 +544,28 @@ pre {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #f7f8f4;
+  background: var(--bg-pre);
   padding: 8px;
   font-size: 12px;
+  transition: background 0.25s, border-color 0.25s;
 }
 
 /* HINT */
 .hint {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #41565a;
+  color: var(--text-hint);
+  transition: color 0.25s;
+}
+
+/* ── Dark mode hint text ── */
+body.dark .hint {
+  color: var(--text-hint);
+}
+
+/* ── Dark mode error feedback text ── */
+body.dark .hint[style*="color"] {
+  color: var(--text-error) !important;
 }
 
 /* FILE LIST */
@@ -357,8 +582,9 @@ pre {
   gap: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fdfefb;
+  background: var(--bg-file);
   padding: 8px;
+  transition: background 0.25s, border-color 0.25s;
 }
 
 .file-info {
@@ -374,7 +600,8 @@ pre {
 
 .file-info span {
   font-size: 12px;
-  color: #4c6264;
+  color: var(--text-muted);
+  transition: color 0.25s;
 }
 
 .delete-btn {
@@ -382,7 +609,12 @@ pre {
 }
 
 .delete-btn:hover {
-  background: #8e3a24;
+  background: var(--btn-delete-hover);
+}
+
+/* ── Dark mode delete button hover ── */
+body.dark .delete-btn:hover {
+  background: #c06040;
 }
 
 /* SPINNER / THROBBER */
