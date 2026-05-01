@@ -443,6 +443,10 @@ def apple_fetch():
 def history_combined():
     username = g.user["username"]
     redis_client = current_app.config["REDIS"]
+    days = float(request.args.get("days", 7))
     limit = int(request.args.get("limit", 500))
+    cutoff = int(time.time()) - int(days * 86400)
     events = get_history_events(redis_client, username, limit=limit)
+    # Filter by time window
+    events = [e for e in events if e.get("timestamp_unix", 0) >= cutoff]
     return jsonify({"events": events})

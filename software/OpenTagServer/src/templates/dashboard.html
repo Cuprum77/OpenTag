@@ -11,6 +11,12 @@
   <header class="topbar">
     <h1>OpenTag Server</h1>
     <div class="topbar-right">
+      <nav class="inline-tabs">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="keys">Keys</button>
+        <button class="tab-btn" data-tab="debug">Debug</button>
+      </nav>
+      <div class="topbar-divider"></div>
       <div class="user">Signed in as <strong id="username">{{ username }}</strong></div>
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>
       <form method="post" action="/auth/logout" class="signout-form">
@@ -19,20 +25,11 @@
     </div>
   </header>
 
-  <nav class="tab-bar">
-    <button class="tab-btn active" data-tab="overview">Overview</button>
-    <button class="tab-btn" data-tab="keys">Keys</button>
-    <button class="tab-btn" data-tab="debug">Debug</button>
-  </nav>
-
   <main class="layout">
     <!-- OVERVIEW TAB -->
     <section class="tab-content active" id="tab-overview">
       <div class="overview-grid">
         <div class="map-area">
-          <div class="map-toolbar">
-            <button id="reload-history">Reload History</button>
-          </div>
           <div id="map"></div>
         </div>
 
@@ -42,6 +39,27 @@
             <div id="tags-container" class="tags-container">
               <p class="hint">Tags will appear here after the first refresh.</p>
             </div>
+          </div>
+
+          <div class="card">
+            <h2>History & Location Management</h2>
+
+            <label class="history-slider-label">
+              Time Range: <span id="history-days-value">7</span> days
+            </label>
+            <input type="range" id="history-days-slider" min="1" max="30" step="1" value="7">
+
+            <button type="button" id="reload-history">Reload History</button>
+
+            <label class="debug-toggle">
+              <input type="checkbox" id="connect-dots-toggle">
+              <span>Connect dots by timestamp</span>
+            </label>
+
+            <label class="debug-toggle">
+              <input type="checkbox" id="highlight-latest-toggle" checked>
+              <span>Highlight latest locations</span>
+            </label>
           </div>
 
           <div class="card">

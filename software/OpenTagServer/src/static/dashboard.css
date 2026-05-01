@@ -83,26 +83,69 @@ body.dark {
   background: radial-gradient(circle at 15% -10%, #0d100d 0%, #161a14 45%, #1e241e 100%);
 }
 
+/* ── Compact Topbar with Inline Tabs ── */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-topbar);
   box-shadow: var(--shadow-topbar);
+  gap: 12px;
   transition: background 0.25s, box-shadow 0.25s;
 }
 
 .topbar h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
+  white-space: nowrap;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Inline tab group */
+.inline-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--paper);
+  border-radius: 8px;
+  padding: 2px;
+  transition: background 0.25s;
+}
+
+.tab-btn {
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.tab-btn:hover {
+  background: var(--tab-hover);
+}
+
+.tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--line);
+  flex-shrink: 0;
 }
 
 .signout-form {
@@ -123,14 +166,8 @@ body.dark .signout-btn {
   background: #8b3028;
 }
 
-/* ── Dark mode signout hover ── */
 body.dark .signout-btn:hover {
   background: #a83a30;
-}
-
-/* ── Dark mode button hover ── */
-body.dark button:not(.signout-btn):not(.delete-btn):not([class*="loading"]) {
-  /* handled by var(--accent) in button rule */
 }
 
 /* THEME TOGGLE BUTTON */
@@ -154,39 +191,6 @@ body.dark button:not(.signout-btn):not(.delete-btn):not([class*="loading"]) {
   border-color: var(--accent) !important;
 }
 
-/* TAB BAR */
-.tab-bar {
-  display: flex;
-  gap: 0;
-  background: var(--bg-tabbar);
-  border-bottom: 1px solid var(--line);
-  padding: 0 16px;
-  transition: background 0.25s;
-}
-
-.tab-btn {
-  background: transparent;
-  color: var(--ink);
-  border: none;
-  border-bottom: 3px solid transparent;
-  padding: 10px 20px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 14px;
-  border-radius: 0;
-  transition: border-color 0.2s, background 0.2s, color 0.2s;
-}
-
-.tab-btn:hover {
-  background: var(--tab-hover);
-}
-
-.tab-btn.active {
-  border-bottom-color: var(--accent);
-  font-weight: 600;
-  background: var(--tab-active);
-}
-
 /* ── Dark mode tab buttons: ensure text is visible on dark tab bar ── */
 body.dark .tab-btn {
   color: #b0c4b8;
@@ -198,8 +202,8 @@ body.dark .tab-btn:hover {
 }
 
 body.dark .tab-btn.active {
-  color: #3dd9db;
-  background: rgba(61, 217, 219, 0.1);
+  color: #fff;
+  background: var(--accent);
 }
 
 /* TAB CONTENT */
@@ -221,7 +225,7 @@ body.dark .tab-btn.active {
 .overview-grid {
   display: grid;
   grid-template-columns: 1.25fr 0.75fr;
-  height: calc(100vh - 52px - 45px); /* subtract topbar (~52px) + tabbar (~45px) */
+  height: calc(100vh - 60px); /* only topbar height */
   min-height: 0;
 }
 
@@ -232,13 +236,6 @@ body.dark .tab-btn.active {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-}
-
-.map-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-  flex-shrink: 0;
 }
 
 #map {
@@ -316,6 +313,27 @@ body.dark .leaflet-popup-close-button {
   font-size: 15px;
   font-weight: 600;
   color: var(--accent);
+}
+
+/* ── History Management Card ── */
+.history-slider-label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  transition: color 0.25s;
+}
+
+#history-days-slider {
+  width: 100%;
+  margin: 4px 0 10px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+#reload-history {
+  width: 100%;
+  margin-bottom: 10px;
 }
 
 /* TAGS */
@@ -445,12 +463,14 @@ body.dark .error-item {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
+  margin: 4px 0;
 }
 
 .debug-toggle input[type="checkbox"] {
   width: auto;
   cursor: pointer;
+  accent-color: var(--accent);
 }
 
 /* BUTTONS */
@@ -644,10 +664,15 @@ button.loading {
 @media (max-width: 960px) {
   .overview-grid {
     grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .map-area {
+    min-height: 300px;
   }
 
   #map {
-    height: 48vh;
+    min-height: 300px;
   }
 
   .sidebar {
@@ -657,5 +682,23 @@ button.loading {
 
   .keys-layout {
     grid-template-columns: 1fr;
+  }
+
+  .inline-tabs {
+    gap: 1px;
+  }
+
+  .tab-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .topbar h1 {
+    font-size: 16px;
+  }
+
+  .topbar {
+    padding: 6px 12px;
+    gap: 8px;
   }
 }

@@ -31,6 +31,7 @@ initDarkMode();
 // ── Tab switching ──
 let map = null;
 let markerLayer = null;
+let polylineLayer = null;
 let lastGoogleTargets = [];
 let lastGoogleCompounds = [];
 
@@ -61,6 +62,7 @@ function initMap() {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
+  polylineLayer = L.layerGroup().addTo(map);
 }
 
 function showJson(id, payload) {
@@ -411,27 +413,88 @@ async function refreshErrors() {
 }
 
 // ── History rendering ──
-function renderHistoryMap(events) {
+function renderHistoryMap(events, options = {}) {
   if (!map || !markerLayer || !window.L) return;
   markerLayer.clearLayers();
+  if (polylineLayer) polylineLayer.clearLayers();
+
+  const connectDots = options.connectDots || false;
+  const highlightLatest = options.highlightLatest !== false;
+
+  // Sort by timestamp ascending for connection order
+  const sorted = [...(events || [])].sort((a, b) => (a.timestamp_unix || 0) - (b.timestamp_unix || 0));
   const points = [];
-  for (const event of events || []) {
+
+  // Track latest timestamp per provider
+  const latestByProvider = {};
+  for (const event of sorted) {
+    const provider = event.provider || 'unknown';
+    const ts = event.timestamp_unix || 0;
+    if (!latestByProvider[provider] || ts > latestByProvider[provider]) {
+      latestByProvider[provider] = ts;
+    }
+  }
+
+  for (const event of sorted) {
     if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number') continue;
     points.push([event.latitude, event.longitude]);
-    const color = event.provider === 'google' ? '#1f78ff' : '#18a96b';
+
+    const provider = event.provider || 'unknown';
+    const isLatest = (event.timestamp_unix || 0) === latestByProvider[provider];
+
+    let fillColor = event.provider === 'google' ? '#1f78ff' : '#18a96b';
+    let fillOpacity = 0.8;
+    let radius = 6;
+    let weight = 1;
+
+    if (highlightLatest && !isLatest) {
+      fillOpacity = 0.3; // 70% transparent
+    } else if (highlightLatest && isLatest) {
+      fillColor = event.provider === 'google' ? '#1fcbff' : '#29ffa2';
+      fillOpacity = 1.0;
+      radius = 8;
+      weight = 2;
+    }
+
     const marker = L.circleMarker([event.latitude, event.longitude], {
-      radius: 6, color: color, fillColor: color, fillOpacity: 0.8
+      radius: radius,
+      color: fillColor,
+      fillColor: fillColor,
+      fillOpacity: fillOpacity,
+      weight: weight
     });
-    marker.bindPopup(event.provider + ' | ' + (event.tag || 'tag') + ' | ' + new Date((event.timestamp_unix || 0) * 1000).toLocaleString());
+    marker.bindPopup(
+      event.provider + ' | ' + (event.tag || 'tag') + ' | ' +
+      new Date((event.timestamp_unix || 0) * 1000).toLocaleString() +
+      (isLatest && highlightLatest ? ' LATEST' : '')
+    );
     marker.addTo(markerLayer);
   }
+
+  // Connect dots with polyline
+  if (connectDots && points.length > 1) {
+    if (!polylineLayer) polylineLayer = L.layerGroup().addTo(map);
+    const line = L.polyline(points, {
+      color: '#ff8c00',
+      weight: 2,
+      opacity: 0.5,
+      dashArray: '5, 8'
+    });
+    line.addTo(polylineLayer);
+  }
+
   if (points.length > 0) map.fitBounds(points, { padding: [20, 20], maxZoom: 14 });
 }
 
 async function refreshCombinedHistory() {
   try {
-    const data = await getJson('/api/history/combined?limit=300');
-    renderHistoryMap(data.events || []);
+    const slider = document.getElementById('history-days-slider');
+    const days = slider ? parseInt(slider.value, 10) : 7;
+    const connectDots = document.getElementById('connect-dots-toggle')?.checked || false;
+    const highlightLatest = document.getElementById('highlight-latest-toggle')?.checked !== false;
+
+    const data = await getJson('/api/history/combined?days=' + encodeURIComponent(days));
+    renderHistoryMap(data.events || [], { connectDots, highlightLatest });
     if (debugMode) showJson('history-output', data);
   } catch (err) {
     if (debugMode) showJson('history-output', { error: String(err) });
@@ -576,6 +639,26 @@ function initDashboard() {
       if (tab) tab.classList.add('active');
     });
   });
+
+  // History slider display update
+  const historySlider = document.getElementById('history-days-slider');
+  if (historySlider) {
+    historySlider.addEventListener('input', () => {
+      const valueEl = document.getElementById('history-days-value');
+      if (valueEl) valueEl.textContent = historySlider.value;
+    });
+  }
+
+  // Re-fetch history on toggle changes
+  const connectDotsToggle = document.getElementById('connect-dots-toggle');
+  if (connectDotsToggle) {
+    connectDotsToggle.addEventListener('change', refreshCombinedHistory);
+  }
+
+  const highlightLatestToggle = document.getElementById('highlight-latest-toggle');
+  if (highlightLatestToggle) {
+    highlightLatestToggle.addEventListener('change', refreshCombinedHistory);
+  }
 
   const refreshFilesBtn = document.getElementById('refresh-files');
   if (refreshFilesBtn) refreshFilesBtn.addEventListener('click', withLoading(refreshFilesBtn, refreshFiles));
