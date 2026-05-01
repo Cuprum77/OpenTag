@@ -88,18 +88,28 @@ body.dark {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 4px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-topbar);
   box-shadow: var(--shadow-topbar);
   gap: 12px;
   transition: background 0.25s, box-shadow 0.25s;
+  min-height: 44px;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .topbar h1 {
   margin: 0;
   font-size: 18px;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 
 .topbar-right {
@@ -111,24 +121,32 @@ body.dark {
 
 /* Inline tab group */
 .inline-tabs {
-  display: flex;
-  gap: 2px;
+  display: block;
   background: var(--paper);
   border-radius: 8px;
   padding: 2px;
   transition: background 0.25s;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.tab-inner {
+  display: inline-block;
 }
 
 .tab-btn {
   background: transparent;
   color: var(--ink);
   border: none;
-  padding: 6px 14px;
+  padding: 8px 14px;
   cursor: pointer;
   font-weight: 500;
   font-size: 13px;
-  border-radius: 6px;
+  border-radius: 7px;
   transition: background 0.2s, color 0.2s;
+  height: 34px;
+  line-height: 18px;
+  display: inline-block;
 }
 
 .tab-btn:hover {
@@ -137,7 +155,7 @@ body.dark {
 
 .tab-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: #0d100d;
   font-weight: 600;
 }
 
@@ -191,19 +209,20 @@ body.dark .signout-btn:hover {
   border-color: var(--accent) !important;
 }
 
-/* ── Dark mode tab buttons: ensure text is visible on dark tab bar ── */
+/* ── Dark mode tab buttons ── */
 body.dark .tab-btn {
-  color: #b0c4b8;
+  color: var(--ink);
 }
 
 body.dark .tab-btn:hover {
-  color: #dce4de;
-  background: rgba(61, 217, 219, 0.08);
+  color: var(--ink);
+  background: var(--tab-hover);
 }
 
 body.dark .tab-btn.active {
-  color: #fff;
+  color: #0d100d;
   background: var(--accent);
+  font-weight: 600;
 }
 
 /* TAB CONTENT */
@@ -440,6 +459,27 @@ body.dark .leaflet-popup-close-button {
 /* ── Dark mode error border ── */
 body.dark .error-item {
   border-color: #6a3535;
+}
+
+/* ── Status feedback messages with WCAG-compliant contrast ── */
+.hint.feedback-success {
+  color: #0a682e !important;
+  font-weight: 500;
+}
+
+.hint.feedback-error {
+  color: #a13b2f !important;
+  font-weight: 500;
+}
+
+body.dark .hint.feedback-success {
+  color: #5ce09a !important;
+  font-weight: 500;
+}
+
+body.dark .hint.feedback-error {
+  color: #f08080 !important;
+  font-weight: 500;
 }
 
 /* KEYS LAYOUT */

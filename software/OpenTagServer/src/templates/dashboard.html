@@ -9,13 +9,15 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>OpenTag Server</h1>
-    <div class="topbar-right">
+    <div class="topbar-left">
       <nav class="inline-tabs">
-        <button class="tab-btn active" data-tab="overview">Overview</button>
-        <button class="tab-btn" data-tab="keys">Keys</button>
-        <button class="tab-btn" data-tab="debug">Debug</button>
+        <div class="tab-inner"><button class="tab-btn active" data-tab="overview">Overview</button></div>
+        <div class="tab-inner"><button class="tab-btn" data-tab="keys">Keys</button></div>
+        <div class="tab-inner"><button class="tab-btn" data-tab="debug">Debug</button></div>
       </nav>
+      <h1>OpenTag Server</h1>
+    </div>
+    <div class="topbar-right">
       <div class="topbar-divider"></div>
       <div class="user">Signed in as <strong id="username">{{ username }}</strong></div>
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>

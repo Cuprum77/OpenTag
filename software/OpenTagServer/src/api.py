@@ -12,10 +12,13 @@ from storage import (
     delete_user_file,
     extract_google_compounds,
     append_history_events,
+    append_alert,
     clear_fetch_status,
     purge_history_events,
+    purge_old_alerts,
     get_fetch_status,
     get_history_events,
+    get_alerts,
     list_user_files,
     merge_apple_keys,
     read_user_accessories,
@@ -161,6 +164,13 @@ def upload_accessories():
         result = save_accessories_upload(g.user["username"], file_obj)
     except Exception as exc:
         logger.error("Failed to upload accessories for user %s: %s", g.user["username"], exc)
+        redis_client = current_app.config["REDIS"]
+        append_alert(redis_client, g.user["username"], {
+            "provider": "apple",
+            "error": str(exc),
+            "type": "file_upload",
+            "target": "accessories",
+        })
         return jsonify({"error": str(exc)}), 400
 
     logger.info("Uploaded accessories file %s for user %s (%d items)", result.get("filename", ""), g.user["username"], result.get("items", 0))
@@ -181,6 +191,12 @@ def keyfiles_delete(filename):
         return jsonify({"error": "file not found"}), 404
     except Exception as exc:
         logger.error("Failed to delete file %s for user %s: %s", filename, username, exc)
+        append_alert(redis_client, username, {
+            "provider": "system",
+            "error": str(exc),
+            "type": "file_delete",
+            "target": filename,
+        })
         return jsonify({"error": str(exc)}), 400
 
     removed_events = 0
@@ -208,6 +224,13 @@ def upload_secrets():
         result = save_secrets_upload(g.user["username"], file_obj)
     except Exception as exc:
         logger.error("Failed to upload secrets for user %s: %s", g.user["username"], exc)
+        redis_client = current_app.config["REDIS"]
+        append_alert(redis_client, g.user["username"], {
+            "provider": "google",
+            "error": str(exc),
+            "type": "file_upload",
+            "target": "secrets",
+        })
         return jsonify({"error": str(exc)}), 400
 
     logger.info("Uploaded secrets.json for user %s", g.user["username"])
@@ -335,6 +358,12 @@ def google_refresh_keys():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
+        append_alert(redis_client, username, {
+            "provider": "google",
+            "error": str(exc),
+            "type": "manual_key_refresh",
+            "target": "refresh_keys",
+        })
         logger.error("Google key refresh failed for user %s: %s", username, exc)
         return jsonify(status_payload), 502
 
@@ -389,6 +418,12 @@ def google_fetch():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
+        append_alert(redis_client, username, {
+            "provider": "google",
+            "error": str(exc),
+            "type": "manual_location_fetch",
+            "target": canonic_id or compound_name,
+        })
         logger.error("Google location fetch failed for user %s, target=%s: %s", username, canonic_id or compound_name, exc)
         return jsonify(status_payload), 502
 
@@ -434,6 +469,12 @@ def apple_fetch():
             "last_data": previous.get("details") if isinstance(previous, dict) else None,
         }
         set_fetch_status(redis_client, username, "apple", status_payload)
+        append_alert(redis_client, username, {
+            "provider": "apple",
+            "error": str(exc),
+            "type": "manual_location_fetch",
+            "target": "apple_locations",
+        })
         logger.error("Apple location fetch failed for user %s: %s", username, exc)
         return jsonify(status_payload), 502
 
@@ -450,3 +491,22 @@ def history_combined():
     # Filter by time window
     events = [e for e in events if e.get("timestamp_unix", 0) >= cutoff]
     return jsonify({"events": events})
+
+
+@api_bp.get("/status/alerts")
+@login_required
+def status_alerts():
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    limit = int(request.args.get("limit", 100))
+    alerts = get_alerts(redis_client, username, limit=limit)
+    return jsonify({"alerts": alerts})
+
+
+@api_bp.post("/status/alerts/clear")
+@login_required
+def clear_alerts():
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    redis_client.set(f"user:{username}:alerts:acked_at", str(int(time.time())))
+    return jsonify({"ok": True})

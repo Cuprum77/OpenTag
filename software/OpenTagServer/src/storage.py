@@ -390,3 +390,66 @@ def purge_old_history_events(redis_client, username, max_age_seconds):
         pipe.rpush(key, *kept)
     pipe.execute()
     return removed
+
+
+# ── Alert storage ──
+
+def append_alert(redis_client, username, alert, max_items=500):
+    """Append an alert event to the user's alert log, capped at max_items."""
+    key = f"user:{username}:alerts"
+    alert["created_unix"] = int(time.time())
+    pipe = redis_client.pipeline()
+    pipe.lpush(key, json.dumps(alert))
+    pipe.ltrim(key, 0, max_items - 1)
+    pipe.execute()
+
+
+def get_alerts(redis_client, username, limit=100):
+    """Get recent alerts sorted by creation time descending."""
+    key = f"user:{username}:alerts"
+    rows = redis_client.lrange(key, 0, max(0, limit - 1))
+    parsed = []
+    for row in rows:
+        try:
+            parsed.append(json.loads(row))
+        except Exception:
+            continue
+    parsed.sort(key=lambda x: x.get("created_unix", 0), reverse=True)
+    return parsed
+
+
+def purge_old_alerts(redis_client, username, max_age_seconds):
+    """Remove alerts older than max_age_seconds. Returns count of removed."""
+    if max_age_seconds <= 0:
+        return 0
+
+    key = f"user:{username}:alerts"
+    raw_rows = redis_client.lrange(key, 0, -1)
+    if not raw_rows:
+        return 0
+
+    cutoff = time.time() - max_age_seconds
+    kept = []
+    removed = 0
+
+    for raw in raw_rows:
+        try:
+            row = json.loads(raw)
+        except Exception:
+            continue
+
+        ts = row.get("created_unix", 0)
+        if ts and ts < cutoff:
+            removed += 1
+        else:
+            kept.append(raw)
+
+    if removed == 0:
+        return 0
+
+    pipe = redis_client.pipeline()
+    pipe.delete(key)
+    if kept:
+        pipe.rpush(key, *kept)
+    pipe.execute()
+    return removed

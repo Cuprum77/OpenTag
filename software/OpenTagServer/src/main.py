@@ -13,9 +13,11 @@ from storage import (
     create_redis_client,
     merge_apple_keys,
     purge_old_history_events,
+    purge_old_alerts,
     read_user_accessories,
     read_user_secrets,
     set_fetch_status,
+    append_alert,
     user_secrets_path,
 )
 
@@ -112,6 +114,13 @@ def _google_auto_refresh_loop(app: Flask):
                                 logger.info("Google key refresh successful for user %s", username)
                             except Exception as exc:
                                 logger.error("Google key refresh failed for user %s: %s", username, exc)
+                                append_alert(redis_client, username, {
+                                    "provider": "google",
+                                    "error": str(exc),
+                                    "type": "auto_key_refresh",
+                                    "target": "keys",
+                                    "timestamp_unix": int(now),
+                                })
 
                         # Location fetch (every query_interval_min)
                         if local_history and query_interval_min > 0:
@@ -162,6 +171,13 @@ def _google_auto_refresh_loop(app: Flask):
                                                             })
                                         except Exception as exc:
                                             logger.warning("Google auto-fetch failed for compound %s, user %s: %s", compound.get("base_name"), username, exc)
+                                            append_alert(redis_client, username, {
+                                                "provider": "google",
+                                                "error": str(exc),
+                                                "type": "auto_fetch_error",
+                                                "target": compound.get("base_name"),
+                                                "timestamp_unix": int(now),
+                                            })
 
                                     if all_events:
                                         from storage import append_history_events
@@ -251,6 +267,13 @@ def _apple_auto_fetch_loop(app: Flask):
                                 redis_client.set(last_fetch_key, str(now))
                             except Exception as exc:
                                 logger.error("Apple auto-fetch failed for user %s: %s", username, exc)
+                                append_alert(redis_client, username, {
+                                    "provider": "apple",
+                                    "error": str(exc),
+                                    "type": "auto_fetch_error",
+                                    "target": "apple_locations",
+                                    "timestamp_unix": int(now),
+                                })
                     except Exception as exc:
                         logger.error("Apple auto-fetch error for user %s: %s", username, exc)
         except Exception as exc:
@@ -284,6 +307,35 @@ def _history_cleanup_loop(app: Flask):
                         logger.error("History cleanup error for user %s: %s", username, exc)
         except Exception as exc:
             logger.error("History cleanup loop error: %s", exc)
+
+        time.sleep(3600)
+
+
+def _alerts_cleanup_loop(app: Flask):
+    logger.info("Alerts cleanup worker started")
+    while True:
+        try:
+            with app.app_context():
+                runtime = app.config["OPENTAG"]
+                redis_client = app.config["REDIS"]
+                users = runtime.get("users", {})
+                retention_days = runtime.get("history_retention_days", 30)
+
+                if retention_days <= 0:
+                    logger.debug("Alerts cleanup disabled (retention_days=%d)", retention_days)
+                    time.sleep(3600)
+                    continue
+
+                max_age_seconds = retention_days * 86400
+                for username in users.keys():
+                    try:
+                        removed = purge_old_alerts(redis_client, username, max_age_seconds)
+                        if removed > 0:
+                            logger.info("Purged %d old alerts for user %s (retention=%d days)", removed, username, retention_days)
+                    except Exception as exc:
+                        logger.error("Alerts cleanup error for user %s: %s", username, exc)
+        except Exception as exc:
+            logger.error("Alerts cleanup loop error: %s", exc)
 
         time.sleep(3600)
 
@@ -336,6 +388,9 @@ def create_app() -> Flask:
 
     cleanup_worker = threading.Thread(target=_history_cleanup_loop, args=(app,), daemon=True)
     cleanup_worker.start()
+
+    alerts_worker = threading.Thread(target=_alerts_cleanup_loop, args=(app,), daemon=True)
+    alerts_worker.start()
 
     return app
 

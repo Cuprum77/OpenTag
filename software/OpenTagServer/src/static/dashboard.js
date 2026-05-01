@@ -80,7 +80,9 @@ function setGoogleFeedback(message, isError = false) {
   const el = document.getElementById('google-targets-feedback');
   if (!el) return;
   el.textContent = message || '';
-  el.style.color = isError ? '#9a2f2f' : '#41565a';
+  // Remove both classes first, then add the appropriate one
+  el.classList.remove('feedback-success', 'feedback-error');
+  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
 }
 
 // ── Loading throbber ──
@@ -414,9 +416,18 @@ async function refreshErrors() {
 
 // ── History rendering ──
 function renderHistoryMap(events, options = {}) {
-  if (!map || !markerLayer || !window.L) return;
-  markerLayer.clearLayers();
-  if (polylineLayer) polylineLayer.clearLayers();
+  if (!map || !markerLayer || !window.L) {
+    console.warn('renderHistoryMap: map not ready', { hasMap: !!map, hasMarkerLayer: !!markerLayer, hasLeaflet: !!window.L });
+    return;
+  }
+
+  try {
+    markerLayer.clearLayers();
+    if (polylineLayer) polylineLayer.clearLayers();
+  } catch (err) {
+    console.error('renderHistoryMap: layer clear error', err);
+    return;
+  }
 
   const connectDots = options.connectDots || false;
   const highlightLatest = options.highlightLatest !== false;
@@ -424,6 +435,13 @@ function renderHistoryMap(events, options = {}) {
   // Sort by timestamp ascending for connection order
   const sorted = [...(events || [])].sort((a, b) => (a.timestamp_unix || 0) - (b.timestamp_unix || 0));
   const points = [];
+
+  if (!sorted.length) {
+    console.log('renderHistoryMap: no events to display');
+    return;
+  }
+
+  console.log('renderHistoryMap: rendering', sorted.length, 'events');
 
   // Track latest timestamp per provider
   const latestByProvider = {};
@@ -456,34 +474,48 @@ function renderHistoryMap(events, options = {}) {
       weight = 2;
     }
 
-    const marker = L.circleMarker([event.latitude, event.longitude], {
-      radius: radius,
-      color: fillColor,
-      fillColor: fillColor,
-      fillOpacity: fillOpacity,
-      weight: weight
-    });
-    marker.bindPopup(
-      event.provider + ' | ' + (event.tag || 'tag') + ' | ' +
-      new Date((event.timestamp_unix || 0) * 1000).toLocaleString() +
-      (isLatest && highlightLatest ? ' LATEST' : '')
-    );
-    marker.addTo(markerLayer);
+    try {
+      const marker = L.circleMarker([event.latitude, event.longitude], {
+        radius: radius,
+        color: fillColor,
+        fillColor: fillColor,
+        fillOpacity: fillOpacity,
+        weight: weight
+      });
+      marker.bindPopup(
+        event.provider + ' | ' + (event.tag || 'tag') + ' | ' +
+        new Date((event.timestamp_unix || 0) * 1000).toLocaleString() +
+        (isLatest && highlightLatest ? ' LATEST' : '')
+      );
+      marker.addTo(markerLayer);
+    } catch (err) {
+      console.error('renderHistoryMap: marker creation error', err, event);
+    }
   }
 
   // Connect dots with polyline
   if (connectDots && points.length > 1) {
     if (!polylineLayer) polylineLayer = L.layerGroup().addTo(map);
-    const line = L.polyline(points, {
-      color: '#ff8c00',
-      weight: 2,
-      opacity: 0.5,
-      dashArray: '5, 8'
-    });
-    line.addTo(polylineLayer);
+    try {
+      const line = L.polyline(points, {
+        color: '#ff8c00',
+        weight: 2,
+        opacity: 0.5,
+        dashArray: '5, 8'
+      });
+      line.addTo(polylineLayer);
+    } catch (err) {
+      console.error('renderHistoryMap: polyline error', err);
+    }
   }
 
-  if (points.length > 0) map.fitBounds(points, { padding: [20, 20], maxZoom: 14 });
+  if (points.length > 0) {
+    try {
+      map.fitBounds(points, { padding: [20, 20], maxZoom: 14 });
+    } catch (err) {
+      console.error('renderHistoryMap: fitBounds error', err);
+    }
+  }
 }
 
 async function refreshCombinedHistory() {
@@ -493,10 +525,14 @@ async function refreshCombinedHistory() {
     const connectDots = document.getElementById('connect-dots-toggle')?.checked || false;
     const highlightLatest = document.getElementById('highlight-latest-toggle')?.checked !== false;
 
+    console.log('refreshCombinedHistory: days=', days, 'connectDots=', connectDots, 'highlightLatest=', highlightLatest);
+
     const data = await getJson('/api/history/combined?days=' + encodeURIComponent(days));
+    console.log('refreshCombinedHistory: received', (data.events || []).length, 'events');
     renderHistoryMap(data.events || [], { connectDots, highlightLatest });
     if (debugMode) showJson('history-output', data);
   } catch (err) {
+    console.error('refreshCombinedHistory: error', err);
     if (debugMode) showJson('history-output', { error: String(err) });
   }
 }
@@ -684,18 +720,6 @@ function initDashboard() {
         google_compounds: lastGoogleCompounds.length,
         include_compound_pieces: googleExpandCompounds.checked
       });
-    });
-  }
-
-  const appleAccessorySelect = document.getElementById('apple-accessory-select');
-  if (appleAccessorySelect) {
-    appleAccessorySelect.addEventListener('change', () => {
-      const selected = appleAccessorySelect.options[appleAccessorySelect.selectedIndex];
-      if (selected && selected.value) {
-        setFilesFeedback('Selected Apple accessory: ' + selected.textContent);
-      } else {
-        setFilesFeedback('');
-      }
     });
   }
 
