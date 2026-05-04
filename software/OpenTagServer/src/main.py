@@ -18,6 +18,7 @@ from storage import (
     read_user_secrets,
     set_fetch_status,
     append_alert,
+    clean_error_message,
     user_secrets_path,
 )
 
@@ -89,6 +90,7 @@ def _google_auto_refresh_loop(app: Flask):
 
                 for username in users.keys():
                     try:
+                        now = time.time()
                         secrets_path = user_secrets_path(username)
                         if not secrets_path:
                             continue
@@ -97,7 +99,6 @@ def _google_auto_refresh_loop(app: Flask):
                         last_refresh_key = "user:" + username + ":meta:last_google_key_refresh"
                         last_refresh = redis_client.get(last_refresh_key)
                         last_refresh_ts = float(last_refresh) if last_refresh else 0
-                        now = time.time()
                         if (now - last_refresh_ts) > (key_refresh_hours * 3600):
                             logger.info("Auto-refreshing Google keys for user %s (last refresh %.0f hours ago)", username, (now - last_refresh_ts) / 3600)
                             try:
@@ -116,7 +117,7 @@ def _google_auto_refresh_loop(app: Flask):
                                 logger.error("Google key refresh failed for user %s: %s", username, exc)
                                 append_alert(redis_client, username, {
                                     "provider": "google",
-                                    "error": str(exc),
+                                    "error": clean_error_message(str(exc)),
                                     "type": "auto_key_refresh",
                                     "target": "keys",
                                     "timestamp_unix": int(now),
@@ -173,7 +174,7 @@ def _google_auto_refresh_loop(app: Flask):
                                             logger.warning("Google auto-fetch failed for compound %s, user %s: %s", compound.get("base_name"), username, exc)
                                             append_alert(redis_client, username, {
                                                 "provider": "google",
-                                                "error": str(exc),
+                                                "error": clean_error_message(str(exc)),
                                                 "type": "auto_fetch_error",
                                                 "target": compound.get("base_name"),
                                                 "timestamp_unix": int(now),
@@ -187,8 +188,28 @@ def _google_auto_refresh_loop(app: Flask):
                                     redis_client.set(last_fetch_key, str(now))
                                 except Exception as exc:
                                     logger.error("Google auto-fetch failed for user %s: %s", username, exc)
+                                    try:
+                                        append_alert(redis_client, username, {
+                                            "provider": "google",
+                                            "error": clean_error_message(str(exc)),
+                                            "type": "worker_error",
+                                            "target": "google_auto_fetch",
+                                            "timestamp_unix": int(now),
+                                        })
+                                    except Exception:
+                                        pass
                     except Exception as exc:
                         logger.error("Google auto-refresh error for user %s: %s", username, exc)
+                        try:
+                            append_alert(redis_client, username, {
+                                "provider": "google",
+                                "error": clean_error_message(str(exc)),
+                                "type": "worker_error",
+                                "target": "google_auto_refresh",
+                                "timestamp_unix": int(now),
+                            })
+                        except Exception:
+                            pass
         except Exception as exc:
             logger.error("Google auto-refresh loop error: %s", exc)
 
@@ -212,6 +233,7 @@ def _apple_auto_fetch_loop(app: Flask):
 
                 for username in users.keys():
                     try:
+                        now = time.time()
                         accessories = read_user_accessories(username)
                         if not accessories:
                             continue
@@ -219,7 +241,6 @@ def _apple_auto_fetch_loop(app: Flask):
                         last_fetch_key = "user:" + username + ":meta:last_apple_fetch"
                         last_fetch = redis_client.get(last_fetch_key)
                         last_fetch_ts = float(last_fetch) if last_fetch else 0
-                        now = time.time()
                         if (now - last_fetch_ts) > (query_interval_min * 60):
                             logger.info("Auto-fetching Apple locations for user %s", username)
                             try:
@@ -269,13 +290,23 @@ def _apple_auto_fetch_loop(app: Flask):
                                 logger.error("Apple auto-fetch failed for user %s: %s", username, exc)
                                 append_alert(redis_client, username, {
                                     "provider": "apple",
-                                    "error": str(exc),
+                                    "error": clean_error_message(str(exc)),
                                     "type": "auto_fetch_error",
                                     "target": "apple_locations",
                                     "timestamp_unix": int(now),
                                 })
                     except Exception as exc:
                         logger.error("Apple auto-fetch error for user %s: %s", username, exc)
+                        try:
+                            append_alert(redis_client, username, {
+                                "provider": "apple",
+                                "error": clean_error_message(str(exc)),
+                                "type": "worker_error",
+                                "target": "apple_auto_fetch",
+                                "timestamp_unix": int(now),
+                            })
+                        except Exception:
+                            pass
         except Exception as exc:
             logger.error("Apple auto-fetch loop error: %s", exc)
 

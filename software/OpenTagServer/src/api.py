@@ -13,7 +13,9 @@ from storage import (
     extract_google_compounds,
     append_history_events,
     append_alert,
+    clean_error_message,
     clear_fetch_status,
+    purge_alerts,
     purge_history_events,
     purge_old_alerts,
     get_fetch_status,
@@ -167,7 +169,7 @@ def upload_accessories():
         redis_client = current_app.config["REDIS"]
         append_alert(redis_client, g.user["username"], {
             "provider": "apple",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "file_upload",
             "target": "accessories",
         })
@@ -193,7 +195,7 @@ def keyfiles_delete(filename):
         logger.error("Failed to delete file %s for user %s: %s", filename, username, exc)
         append_alert(redis_client, username, {
             "provider": "system",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "file_delete",
             "target": filename,
         })
@@ -227,7 +229,7 @@ def upload_secrets():
         redis_client = current_app.config["REDIS"]
         append_alert(redis_client, g.user["username"], {
             "provider": "google",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "file_upload",
             "target": "secrets",
         })
@@ -309,6 +311,7 @@ def status_errors():
 @login_required
 def google_targets():
     username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
     path = user_secrets_path(username)
     if not path:
         return jsonify({"error": "secrets.json is required"}), 400
@@ -319,6 +322,12 @@ def google_targets():
         return jsonify(payload)
     except Exception as exc:
         logger.error("Failed to list Google targets for user %s: %s", username, exc)
+        append_alert(redis_client, username, {
+            "provider": "google",
+            "error": clean_error_message(str(exc)),
+            "type": "list_targets",
+            "target": "google_targets",
+        })
         return jsonify({"error": str(exc)}), 400
 
 
@@ -360,7 +369,7 @@ def google_refresh_keys():
         set_fetch_status(redis_client, username, "google", status_payload)
         append_alert(redis_client, username, {
             "provider": "google",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "manual_key_refresh",
             "target": "refresh_keys",
         })
@@ -420,7 +429,7 @@ def google_fetch():
         set_fetch_status(redis_client, username, "google", status_payload)
         append_alert(redis_client, username, {
             "provider": "google",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "manual_location_fetch",
             "target": canonic_id or compound_name,
         })
@@ -443,9 +452,21 @@ def apple_fetch():
     runtime = current_app.config["OPENTAG"]
     redis_client = current_app.config["REDIS"]
 
+    # Build alert callback for per-report decryption/orphaned failures
+    def _apple_report_alert_callback(fail):
+        reason = fail.get("reason", "unknown")
+        is_orphaned = reason == "missing_private_key"
+        alert_type = "orphaned_report" if is_orphaned else "decryption_failure"
+        append_alert(redis_client, username, {
+            "provider": "apple",
+            "error": reason,
+            "type": alert_type,
+            "target": "apple_haystack_report",
+        })
+
     try:
         logger.info("Fetching Apple locations for user %s, days=%d", username, days)
-        payload = fetch_apple_locations(runtime.get("haystack", {}), accessories, days=days, timeout=timeout)
+        payload = fetch_apple_locations(runtime.get("haystack", {}), accessories, days=days, timeout=timeout, _alert_callback=_apple_report_alert_callback)
         status_payload = {
             "provider": "apple",
             "ok": True,
@@ -471,7 +492,7 @@ def apple_fetch():
         set_fetch_status(redis_client, username, "apple", status_payload)
         append_alert(redis_client, username, {
             "provider": "apple",
-            "error": str(exc),
+            "error": clean_error_message(str(exc)),
             "type": "manual_location_fetch",
             "target": "apple_locations",
         })
@@ -508,5 +529,5 @@ def status_alerts():
 def clear_alerts():
     username = g.user["username"]
     redis_client = current_app.config["REDIS"]
-    redis_client.set(f"user:{username}:alerts:acked_at", str(int(time.time())))
-    return jsonify({"ok": True})
+    removed = purge_alerts(redis_client, username)
+    return jsonify({"ok": True, "removed": removed})

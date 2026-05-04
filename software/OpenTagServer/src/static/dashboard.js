@@ -386,27 +386,29 @@ async function refreshStatus() {
   }
 }
 
-// ── Errors rendering ──
-function renderErrors(data) {
+// ── Alerts rendering ──
+function renderAlerts(data) {
   const container = document.getElementById('errors-container');
   if (!container) return;
   if (debugMode) showJson('errors-output', data);
 
-  const errors = data.errors || [];
-  if (errors.length === 0) { container.innerHTML = '<p class="hint">No errors</p>'; return; }
+  const alerts = data.alerts || [];
+  if (alerts.length === 0) { container.innerHTML = '<p class="hint">No errors</p>'; return; }
 
   let html = '';
-  for (const err of errors) {
-    const timeStr = err.timestamp_unix ? new Date(err.timestamp_unix * 1000).toLocaleString() : '';
-    html += '<div class="error-item"><strong>' + (err.provider || 'unknown') + '</strong>: ' + (err.error || 'Unknown error') + (timeStr ? '<br><small>' + timeStr + '</small>' : '') + '</div>';
+  for (const alert of alerts) {
+    const timeStr = alert.created_unix ? new Date(alert.created_unix * 1000).toLocaleString() : '';
+    const typeStr = alert.type ? ' <span class="alert-type">' + alert.type + '</span>' : '';
+    const targetStr = alert.target ? ' <span class="alert-target">[' + (alert.target || '') + ']</span>' : '';
+    html += '<div class="error-item"><strong>' + (alert.provider || 'unknown') + '</strong>: ' + (alert.error || 'Unknown error') + typeStr + targetStr + (timeStr ? '<br><small>' + timeStr + '</small>' : '') + '</div>';
   }
   container.innerHTML = html;
 }
 
 async function refreshErrors() {
   try {
-    const data = await getJson('/api/status/errors');
-    renderErrors(data);
+    const data = await getJson('/api/status/alerts');
+    renderAlerts(data);
   } catch (err) {
     const container = document.getElementById('errors-container');
     if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
@@ -706,6 +708,20 @@ function initDashboard() {
   if (refreshStatusBtn) refreshStatusBtn.addEventListener('click', withLoading(refreshStatusBtn, refreshStatus));
   const refreshErrorsBtn = document.getElementById('refresh-errors');
   if (refreshErrorsBtn) refreshErrorsBtn.addEventListener('click', withLoading(refreshErrorsBtn, refreshErrors));
+
+  // Clear alerts button
+  const clearAlertsBtn = document.getElementById('clear-alerts-btn');
+  if (clearAlertsBtn) {
+    clearAlertsBtn.addEventListener('click', withLoading(clearAlertsBtn, async () => {
+      try {
+        const data = await postJson('/api/status/alerts/clear', {});
+        await refreshErrors();
+      } catch (err) {
+        const container = document.getElementById('errors-container');
+        if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
+      }
+    }));
+  }
   const fetchSelectedBtn = document.getElementById('fetch-selected-btn');
   if (fetchSelectedBtn) fetchSelectedBtn.addEventListener('click', withLoading(fetchSelectedBtn, fetchAllSelected));
   const refreshKeysSelectedBtn = document.getElementById('refresh-keys-selected-btn');

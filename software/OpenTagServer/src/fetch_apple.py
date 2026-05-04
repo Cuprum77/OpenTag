@@ -143,7 +143,7 @@ def _build_lookup_map(hashed_keys_map, source_map):
     return lookup
 
 
-def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=200):
+def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=200, _alert_callback=None):
     endpoint = (haystack_cfg or {}).get("endpoint", "").strip()
     if not endpoint:
         raise ValueError("haystack endpoint is not configured")
@@ -201,6 +201,14 @@ def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, ba
             failed.append({"reason": str(exc), "report": report})
 
     decoded.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+    # Fire alert callback for each decryption/orphaned failure if provided
+    if _alert_callback:
+        for fail in failed:
+            try:
+                _alert_callback(fail)
+            except Exception:
+                pass  # Don't let alert callback failures break the fetch
 
     return {
         "provider": "apple",

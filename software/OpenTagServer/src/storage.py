@@ -392,7 +392,55 @@ def purge_old_history_events(redis_client, username, max_age_seconds):
     return removed
 
 
-# ── Alert storage ──
+import re
+
+def clean_error_message(error_str):
+    """Extract a clean, human-readable error message from a Python exception string.
+
+    Strips traceback prefixes and extracts just the final exception type and message.
+    Returns the cleaned message, or 'Unknown error' if nothing meaningful can be extracted.
+    """
+    if not error_str:
+        return "Unknown error"
+
+    # If the string contains "Traceback", extract only the last line (the actual exception)
+    if "Traceback" in error_str:
+        # Find the last line that contains the actual exception
+        lines = error_str.strip().split("\n")
+        for line in reversed(lines):
+            line = line.strip()
+            # Skip traceback header, "During handling", "The above exception", "While executing" lines
+            if line.startswith("Traceback (most recent call last):"):
+                continue
+            if line.startswith("During handling of the above exception:"):
+                continue
+            if line.startswith("The above exception was the direct cause of the following exception:"):
+                continue
+            # Match patterns like "TypeError: something" or "httpcore.ReadTimeout: ..."
+            if ":" in line and not line.startswith("  "):
+                # Take the part after the last colon-space that looks like an exception
+                parts = line.rsplit(":", 1)
+                if len(parts) == 2:
+                    return parts[1].strip() if parts[1].strip() else line
+                return line
+            # If it's just a message without exception type, use it
+            if line and not line.startswith("  "):
+                return line
+        return "Unknown error"
+
+    # No traceback — just clean up leading/trailing whitespace and return
+    cleaned = error_str.strip()
+    return cleaned if cleaned else "Unknown error"
+
+
+def purge_alerts(redis_client, username):
+    """Delete all alerts for a user. Returns the number of alerts removed."""
+    key = f"user:{username}:alerts"
+    count = redis_client.llen(key) if redis_client else 0
+    if count > 0:
+        redis_client.delete(key)
+    return int(count)
+
 
 def append_alert(redis_client, username, alert, max_items=500):
     """Append an alert event to the user's alert log, capped at max_items."""

@@ -461,6 +461,42 @@ body.dark .error-item {
   border-color: #6a3535;
 }
 
+/* ── Alert type/target badges ── */
+.alert-type {
+  display: inline-block;
+  background: var(--warning);
+  color: #0d100d;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.alert-target {
+  display: inline-block;
+  background: var(--accent);
+  color: #0d100d;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 4px;
+  opacity: 0.85;
+}
+
+body.dark .alert-type {
+  background: #f0c05a;
+  color: #0d100d;
+}
+
+body.dark .alert-target {
+  background: #3dd9db;
+  color: #0d100d;
+}
+
 /* ── Status feedback messages with WCAG-compliant contrast ── */
 .hint.feedback-success {
   color: #0a682e !important;
