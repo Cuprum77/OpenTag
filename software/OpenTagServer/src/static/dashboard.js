@@ -70,17 +70,26 @@ function showJson(id, payload) {
   if (host) host.textContent = JSON.stringify(payload, null, 2);
 }
 
-function setFilesFeedback(message, isError = false) {
-  const el = document.getElementById('files-feedback');
+function setAppleFeedback(message, isError = false) {
+  const el = document.getElementById('apple-feedback');
+  if (!el) return;
   el.textContent = message || '';
-  el.style.color = isError ? '#9a2f2f' : '#41565a';
+  el.classList.remove('feedback-success', 'feedback-error');
+  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
 }
 
 function setGoogleFeedback(message, isError = false) {
+  const el = document.getElementById('google-feedback');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.remove('feedback-success', 'feedback-error');
+  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
+}
+
+function setOverviewGoogleFeedback(message, isError = false) {
   const el = document.getElementById('google-targets-feedback');
   if (!el) return;
   el.textContent = message || '';
-  // Remove both classes first, then add the appropriate one
   el.classList.remove('feedback-success', 'feedback-error');
   el.classList.add(isError ? 'feedback-error' : 'feedback-success');
 }
@@ -103,17 +112,176 @@ function withLoading(button, asyncFn) {
   };
 }
 
-// ── File management ──
-function renderFiles(files) {
-  const host = document.getElementById('files-list');
+// ── Apple accessories list ──
+function renderAppleAccessoriesList(accessories) {
+  const host = document.getElementById('apple-accessories-list');
   if (!host) return;
   host.innerHTML = '';
+
+  const rows = Array.isArray(accessories) ? accessories : [];
+  if (rows.length === 0) {
+    host.innerHTML = '<p class="hint">No accessories uploaded yet.</p>';
+    return;
+  }
+
+  for (const acc of rows) {
+    const row = document.createElement('div');
+    row.className = 'key-row apple';
+    const header = document.createElement('div');
+    header.className = 'key-row-header';
+    const info = document.createElement('div');
+    info.className = 'key-row-info';
+    const name = acc.name || ('Tracker #' + (acc.id || ''));
+    const count = typeof acc.key_count === 'number' ? acc.key_count : 0;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'key-name';
+    nameEl.textContent = name;
+    const metaEl = document.createElement('span');
+    metaEl.className = 'key-meta';
+    metaEl.textContent = count + ' key' + (count !== 1 ? 's' : '');
+    info.appendChild(nameEl);
+    info.appendChild(metaEl);
+    header.appendChild(info);
+    row.appendChild(header);
+    host.appendChild(row);
+  }
+}
+
+// ── Google targets list ──
+function renderGoogleTargetsList(targets, compounds) {
+  const host = document.getElementById('google-targets-list');
+  if (!host) return;
+  host.innerHTML = '';
+
+  const targetRows = Array.isArray(targets) ? targets : [];
+  const compoundRows = Array.isArray(compounds) ? compounds : [];
+
+  if (targetRows.length === 0 && compoundRows.length === 0) {
+    host.innerHTML = '<p class="hint">No Google targets found. Upload secrets.json and refresh keys.</p>';
+    return;
+  }
+
+  if (compoundRows.length > 0) {
+    for (const compound of compoundRows) {
+      const row = document.createElement('div');
+      row.className = 'key-row google';
+      const label = compound.base_name || compound.compound_id;
+      const subtags = compound.subtags || [];
+      const subtagCount = subtags.length;
+      const keyCount = typeof compound.requested_key_count === 'number' ? compound.requested_key_count : 0;
+
+      const header = document.createElement('div');
+      header.className = 'key-row-header';
+
+      const info = document.createElement('div');
+      info.className = 'key-row-info';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'key-name';
+      nameEl.textContent = label;
+      const metaEl = document.createElement('span');
+      metaEl.className = 'key-meta';
+      metaEl.textContent = 'compound | ' + keyCount + ' keys | ' + subtagCount + ' subtag' + (subtagCount !== 1 ? 's' : '');
+      info.appendChild(nameEl);
+      info.appendChild(metaEl);
+      header.appendChild(info);
+
+      if (subtagCount > 0) {
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'key-row-expand-btn';
+        expandBtn.textContent = '▼';
+        const details = document.createElement('div');
+        details.className = 'key-row-details';
+        for (const subtag of subtags) {
+          const subtagEl = document.createElement('div');
+          subtagEl.className = 'key-subtag';
+          const nameSpan = document.createElement('span');
+          nameSpan.className = 'key-subtag-name';
+          nameSpan.textContent = subtag.name || 'unnamed';
+          const countSpan = document.createElement('span');
+          countSpan.className = 'key-subtag-count';
+          countSpan.textContent = (subtag.key_count || 0) + ' keys';
+          subtagEl.appendChild(nameSpan);
+          subtagEl.appendChild(countSpan);
+          details.appendChild(subtagEl);
+        }
+        expandBtn.addEventListener('click', () => {
+          const isOpen = details.classList.toggle('open');
+          expandBtn.textContent = isOpen ? '▲' : '▼';
+        });
+        header.appendChild(expandBtn);
+        row.appendChild(header);
+        row.appendChild(details);
+      } else {
+        row.appendChild(header);
+      }
+      host.appendChild(row);
+    }
+  }
+
+  if (targetRows.length > 0) {
+    for (const target of targetRows) {
+      const row = document.createElement('div');
+      row.className = 'key-row google';
+      const header = document.createElement('div');
+      header.className = 'key-row-header';
+      const info = document.createElement('div');
+      info.className = 'key-row-info';
+      const label = deriveGoogleTargetLabel(target);
+      const value = deriveGoogleTargetValue(target);
+      const nameEl = document.createElement('span');
+      nameEl.className = 'key-name';
+      nameEl.textContent = label;
+      const metaEl = document.createElement('span');
+      metaEl.className = 'key-meta';
+      metaEl.textContent = value !== label ? value : 'target';
+      info.appendChild(nameEl);
+      info.appendChild(metaEl);
+      header.appendChild(info);
+      row.appendChild(header);
+      host.appendChild(row);
+    }
+  }
+}
+
+// ── File management (per section) ──
+function renderAppleFiles(files) {
+  const host = document.getElementById('apple-files-list');
+  if (!host) return;
+  host.innerHTML = '';
+
+  const rows = (Array.isArray(files) ? files : []).filter(f => f && f.category === 'accessories');
+  if (rows.length === 0) return;
+
+  for (const file of rows) {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const info = document.createElement('div');
+    info.className = 'file-info';
+    const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
+    info.innerHTML = '<strong>' + file.filename + '</strong><span>' + file.size + ' bytes | ' + updated + '</span>';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'delete-btn';
+    btn.dataset.filename = file.filename;
+    btn.textContent = 'Delete';
+    row.appendChild(info);
+    row.appendChild(btn);
+    host.appendChild(row);
+  }
+}
+
+function renderGoogleFiles(files) {
+  const host = document.getElementById('google-files-list');
+  if (!host) return;
+  host.innerHTML = '';
+
   const secretsInput = document.getElementById('secrets-file');
   const secretsBtn = document.getElementById('upload-secrets-btn');
   const googleHint = document.getElementById('google-upload-hint');
 
-  const rows = Array.isArray(files) ? files : [];
-  const hasSecrets = rows.some((f) => f && f.filename === 'secrets.json');
+  const rows = (Array.isArray(files) ? files : []).filter(f => f && f.category === 'secrets');
+  const hasSecrets = rows.length > 0;
   if (secretsInput) secretsInput.disabled = hasSecrets;
   if (secretsBtn) secretsBtn.disabled = hasSecrets;
   if (googleHint) {
@@ -123,7 +291,7 @@ function renderFiles(files) {
   }
 
   if (rows.length === 0) {
-    host.innerHTML = '<p class="hint">No auth files uploaded yet.</p>';
+    host.innerHTML = '<p class="hint">No secrets.json uploaded.</p>';
     return;
   }
 
@@ -133,7 +301,7 @@ function renderFiles(files) {
     const info = document.createElement('div');
     info.className = 'file-info';
     const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
-    info.innerHTML = '<strong>' + file.filename + '</strong><span>' + file.category + ' | ' + file.size + ' bytes | ' + updated + '</span>';
+    info.innerHTML = '<strong>' + file.filename + '</strong><span>' + file.size + ' bytes | ' + updated + '</span>';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'delete-btn';
@@ -291,11 +459,11 @@ async function postJson(path, payload) {
 async function refreshFiles() {
   try {
     const data = await getJson('/api/keyfiles');
-    renderFiles(data.files || []);
-    setFilesFeedback('');
+    renderAppleFiles(data.files || []);
+    renderGoogleFiles(data.files || []);
   } catch (err) {
-    renderFiles([]);
-    setFilesFeedback(String(err), true);
+    renderAppleFiles([]);
+    renderGoogleFiles([]);
   }
 }
 
@@ -340,6 +508,7 @@ async function refreshTags() {
     renderTags(data);
     renderAppleAccessoryOptions(data.apple_tags || []);
     renderGoogleCompoundOptions(data.google_compounds || []);
+    renderAppleAccessoriesList(data.apple_tags || []);
     await listGoogleTargets(false);
   } catch (err) {
     const container = document.getElementById('tags-container');
@@ -544,6 +713,7 @@ async function listGoogleTargets(showFeedback = true) {
   try {
     const data = await getJson('/api/google/targets');
     renderGoogleTargetOptions(data);
+    renderGoogleTargetsList(data.targets || [], lastGoogleCompounds);
     const count = Array.isArray(data.targets) ? data.targets.length : 0;
     if (showFeedback) {
       setGoogleFeedback(count > 0 ? 'Loaded ' + count + ' Google target' + (count === 1 ? '' : 's') + '.' : 'No Google targets were returned.');
@@ -577,7 +747,7 @@ async function fetchAllSelected() {
   const googleTrackersSelected = getMultiSelectedValues('google-canonic-id');
 
   if (appleSelected.length === 0 && googleCompoundsSelected.length === 0 && googleTrackersSelected.length === 0) {
-    setGoogleFeedback('Nothing selected. Pick any Apple or Google entries and run fetch.');
+    setOverviewGoogleFeedback('Nothing selected. Pick any Apple or Google entries and run fetch.');
     return;
   }
 
@@ -612,9 +782,9 @@ async function fetchAllSelected() {
   }
 
   if (failures.length > 0) {
-    setGoogleFeedback('Completed with errors. Success=' + successCount + ', Failed=' + failures.length + '. ' + failures[0], true);
+    setOverviewGoogleFeedback('Completed with errors. Success=' + successCount + ', Failed=' + failures.length + '. ' + failures[0], true);
   } else {
-    setGoogleFeedback('Fetched selected items successfully. Operations=' + successCount + '.');
+    setOverviewGoogleFeedback('Fetched selected items successfully. Operations=' + successCount + '.');
   }
 
   if (debugMode) {
@@ -641,17 +811,17 @@ async function refreshGoogleKeysForSelected() {
   const totalGoogleSelected = googleCompoundsSelected.length + googleTrackersSelected.length;
 
   if (totalGoogleSelected === 0) {
-    setGoogleFeedback('No Google selections found. Key refresh skipped.');
+    setOverviewGoogleFeedback('No Google selections found. Key refresh skipped.');
     return;
   }
 
   try {
     await postJson('/api/google/refresh-keys', {});
-    setGoogleFeedback('Google keys refreshed for current selection (' + totalGoogleSelected + ' selected).');
+    setOverviewGoogleFeedback('Google keys refreshed for current selection (' + totalGoogleSelected + ' selected).');
     await listGoogleTargets(false);
     await refreshStatus();
   } catch (err) {
-    setGoogleFeedback(String(err), true);
+    setOverviewGoogleFeedback(String(err), true);
     if (debugMode) showJson('google-output', { error: String(err), action: 'refresh_keys_selected' });
   }
 }
@@ -698,16 +868,8 @@ function initDashboard() {
     highlightLatestToggle.addEventListener('change', refreshCombinedHistory);
   }
 
-  const refreshFilesBtn = document.getElementById('refresh-files');
-  if (refreshFilesBtn) refreshFilesBtn.addEventListener('click', withLoading(refreshFilesBtn, refreshFiles));
   const reloadHistoryBtn = document.getElementById('reload-history');
   if (reloadHistoryBtn) reloadHistoryBtn.addEventListener('click', withLoading(reloadHistoryBtn, refreshCombinedHistory));
-  const refreshTagsBtn = document.getElementById('refresh-tags');
-  if (refreshTagsBtn) refreshTagsBtn.addEventListener('click', withLoading(refreshTagsBtn, refreshTags));
-  const refreshStatusBtn = document.getElementById('refresh-status');
-  if (refreshStatusBtn) refreshStatusBtn.addEventListener('click', withLoading(refreshStatusBtn, refreshStatus));
-  const refreshErrorsBtn = document.getElementById('refresh-errors');
-  if (refreshErrorsBtn) refreshErrorsBtn.addEventListener('click', withLoading(refreshErrorsBtn, refreshErrors));
 
   // Clear alerts button
   const clearAlertsBtn = document.getElementById('clear-alerts-btn');
@@ -739,9 +901,27 @@ function initDashboard() {
     });
   }
 
-  const filesList = document.getElementById('files-list');
-  if (filesList) {
-    filesList.addEventListener('click', async (evt) => {
+  // Google refresh keys button (Keys tab)
+  const refreshGoogleKeysBtn = document.getElementById('refresh-google-keys-btn');
+  if (refreshGoogleKeysBtn) {
+    refreshGoogleKeysBtn.addEventListener('click', withLoading(refreshGoogleKeysBtn, async () => {
+      try {
+        const data = await postJson('/api/google/refresh-keys', {});
+        setGoogleFeedback('Google keys refreshed successfully at ' + new Date().toLocaleTimeString());
+        if (debugMode) showJson('google-output', data);
+        await listGoogleTargets(false);
+        await refreshStatus();
+      } catch (err) {
+        setGoogleFeedback(String(err), true);
+        if (debugMode) showJson('google-output', { error: String(err) });
+      }
+    }));
+  }
+
+  // File delete handlers (per section)
+  const appleFilesList = document.getElementById('apple-files-list');
+  if (appleFilesList) {
+    appleFilesList.addEventListener('click', async (evt) => {
       const target = evt.target;
       if (!(target instanceof HTMLElement) || !target.classList.contains('delete-btn')) return;
       const filename = target.dataset.filename;
@@ -749,12 +929,33 @@ function initDashboard() {
       if (!window.confirm('Delete ' + filename + '?')) return;
       try {
         await deleteKeyfile(filename);
-        setFilesFeedback('Deleted ' + filename);
+        setAppleFeedback('Deleted ' + filename);
         await refreshFiles();
         await refreshTags();
         await refreshErrors();
       } catch (err) {
-        setFilesFeedback(String(err), true);
+        setAppleFeedback(String(err), true);
+      }
+    });
+  }
+
+  const googleFilesList = document.getElementById('google-files-list');
+  if (googleFilesList) {
+    googleFilesList.addEventListener('click', async (evt) => {
+      const target = evt.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains('delete-btn')) return;
+      const filename = target.dataset.filename;
+      if (!filename) return;
+      if (!window.confirm('Delete ' + filename + '?')) return;
+      try {
+        await deleteKeyfile(filename);
+        setGoogleFeedback('Deleted ' + filename);
+        await refreshFiles();
+        await refreshTags();
+        await refreshErrors();
+        await listGoogleTargets(false);
+      } catch (err) {
+        setGoogleFeedback(String(err), true);
       }
     });
   }
@@ -768,11 +969,11 @@ function initDashboard() {
       if (!file) return;
       try {
         await postFile('/api/upload/accessories', file);
-        setFilesFeedback('Uploaded Apple file');
+        setAppleFeedback('Uploaded Apple accessories file');
         await refreshFiles();
         await refreshTags();
       } catch (err) {
-        setFilesFeedback(String(err), true);
+        setAppleFeedback(String(err), true);
       }
     });
   }
@@ -783,7 +984,7 @@ function initDashboard() {
       evt.preventDefault();
       const secretsBtn = document.getElementById('upload-secrets-btn');
       if (secretsBtn && secretsBtn.disabled) {
-        setFilesFeedback('Delete existing secrets.json before uploading a new one.', true);
+        setGoogleFeedback('Delete existing secrets.json before uploading a new one.', true);
         return;
       }
       const fileInput = document.getElementById('secrets-file');
@@ -791,11 +992,12 @@ function initDashboard() {
       if (!file) return;
       try {
         await postFile('/api/upload/secrets', file);
-        setFilesFeedback('Uploaded Google file');
+        setGoogleFeedback('Uploaded Google secrets file');
         await refreshFiles();
         await refreshTags();
+        await listGoogleTargets(false);
       } catch (err) {
-        setFilesFeedback(String(err), true);
+        setGoogleFeedback(String(err), true);
       }
     });
   }

@@ -116,30 +116,40 @@
     <!-- KEYS TAB -->
     <section class="tab-content" id="tab-keys">
       <div class="keys-layout">
-        <div class="card">
-          <h2>Upload Apple Accessories</h2>
-          <form id="upload-accessories-form">
-            <label>Upload accessories.json</label>
-            <input type="file" id="accessories-file" accept="application/json,.json" required>
-            <button type="submit">Upload Apple File</button>
-          </form>
+        <div class="card keys-section">
+          <h2>Apple Accessories</h2>
+          <div class="keys-actions">
+            <form id="upload-accessories-form" class="keys-upload-form">
+              <label>Upload accessories.json</label>
+              <input type="file" id="accessories-file" accept="application/json,.json" required>
+              <button type="submit">Upload</button>
+            </form>
+          </div>
+          <p id="apple-feedback" class="hint"></p>
+          <div id="apple-accessories-list" class="key-list scrollable"></div>
+          <div class="keys-section-divider">
+            <span>Source files</span>
+          </div>
+          <div id="apple-files-list" class="file-list"></div>
         </div>
 
-        <div class="card">
-          <h2>Upload Google Secrets</h2>
-          <form id="upload-secrets-form">
-            <label>Upload secrets.json</label>
-            <input type="file" id="secrets-file" accept="application/json,.json" required>
-            <button type="submit" id="upload-secrets-btn">Upload Google File</button>
-          </form>
+        <div class="card keys-section">
+          <h2>Google Secrets</h2>
+          <div class="keys-actions">
+            <form id="upload-secrets-form" class="keys-upload-form">
+              <label>Upload secrets.json</label>
+              <input type="file" id="secrets-file" accept="application/json,.json" required>
+              <button type="submit" id="upload-secrets-btn">Upload</button>
+            </form>
+            <button type="button" id="refresh-google-keys-btn" class="keys-secondary-btn">Refresh Keys from Google</button>
+          </div>
           <p id="google-upload-hint" class="hint"></p>
-        </div>
-
-        <div class="card">
-          <h2>Keyfiles</h2>
-          <button id="refresh-files">Refresh Files</button>
-          <p id="files-feedback" class="hint"></p>
-          <div id="files-list" class="file-list"></div>
+          <p id="google-feedback" class="hint"></p>
+          <div id="google-targets-list" class="key-list scrollable"></div>
+          <div class="keys-section-divider">
+            <span>Auth file</span>
+          </div>
+          <div id="google-files-list" class="file-list"></div>
         </div>
       </div>
     </section>
