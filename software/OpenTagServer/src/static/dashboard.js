@@ -35,20 +35,6 @@ let polylineLayer = null;
 let lastGoogleTargets = [];
 let lastGoogleCompounds = [];
 
-// ── Debug toggle (persisted in localStorage) ──
-const debugToggle = document.getElementById('debug-mode-toggle');
-const debugPanels = document.querySelectorAll('.debug-panel');
-let debugMode = localStorage.getItem('opentag_debug') === 'true';
-if (debugToggle) debugToggle.checked = debugMode;
-
-function toggleDebug(show) {
-  debugMode = show;
-  localStorage.setItem('opentag_debug', show);
-  debugPanels.forEach(p => p.style.display = show ? 'block' : 'none');
-}
-toggleDebug(debugMode);
-if (debugToggle) debugToggle.addEventListener('change', () => toggleDebug(debugToggle.checked));
-
 function initMap() {
   const mapHost = document.getElementById('map');
   if (!mapHost) return;
@@ -63,11 +49,6 @@ function initMap() {
   }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
   polylineLayer = L.layerGroup().addTo(map);
-}
-
-function showJson(id, payload) {
-  const host = document.getElementById(id);
-  if (host) host.textContent = JSON.stringify(payload, null, 2);
 }
 
 function setAppleFeedback(message, isError = false) {
@@ -259,7 +240,19 @@ function renderAppleFiles(files) {
     const info = document.createElement('div');
     info.className = 'file-info';
     const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
-    info.innerHTML = '<strong>' + file.filename + '</strong><span>' + file.size + ' bytes | ' + updated + '</span>';
+
+    const nameLink = document.createElement('a');
+    nameLink.className = 'file-name-link';
+    nameLink.href = '/api/keyfiles/' + encodeURIComponent(file.filename) + '/download';
+    nameLink.textContent = file.filename;
+    nameLink.title = 'Click to download';
+
+    const meta = document.createElement('span');
+    meta.textContent = file.size + ' bytes | ' + updated;
+
+    info.appendChild(nameLink);
+    info.appendChild(meta);
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'delete-btn';
@@ -301,7 +294,19 @@ function renderGoogleFiles(files) {
     const info = document.createElement('div');
     info.className = 'file-info';
     const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
-    info.innerHTML = '<strong>' + file.filename + '</strong><span>' + file.size + ' bytes | ' + updated + '</span>';
+
+    const nameLink = document.createElement('a');
+    nameLink.className = 'file-name-link';
+    nameLink.href = '/api/keyfiles/' + encodeURIComponent(file.filename) + '/download';
+    nameLink.textContent = file.filename;
+    nameLink.title = 'Click to download';
+
+    const meta = document.createElement('span');
+    meta.textContent = file.size + ' bytes | ' + updated;
+
+    info.appendChild(nameLink);
+    info.appendChild(meta);
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'delete-btn';
@@ -481,7 +486,7 @@ async function deleteKeyfile(filename) {
 function renderTags(data) {
   const container = document.getElementById('tags-container');
   if (!container) return;
-  if (debugMode) showJson('tags-output', data);
+
 
   const appleTags = data.apple_tags || [];
   const googleCompounds = data.google_compounds || [];
@@ -513,7 +518,7 @@ async function refreshTags() {
   } catch (err) {
     const container = document.getElementById('tags-container');
     if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-    if (debugMode) showJson('tags-output', { error: String(err) });
+
   }
 }
 
@@ -521,7 +526,7 @@ async function refreshTags() {
 function renderStatus(data) {
   const container = document.getElementById('status-container');
   if (!container) return;
-  if (debugMode) showJson('status-output', data);
+
 
   const providers = [
     { key: 'google', label: 'Google' },
@@ -551,7 +556,7 @@ async function refreshStatus() {
   } catch (err) {
     const container = document.getElementById('status-container');
     if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-    if (debugMode) showJson('status-output', { error: String(err) });
+
   }
 }
 
@@ -559,7 +564,7 @@ async function refreshStatus() {
 function renderAlerts(data) {
   const container = document.getElementById('errors-container');
   if (!container) return;
-  if (debugMode) showJson('errors-output', data);
+
 
   const alerts = data.alerts || [];
   if (alerts.length === 0) { container.innerHTML = '<p class="hint">No errors</p>'; return; }
@@ -581,7 +586,7 @@ async function refreshErrors() {
   } catch (err) {
     const container = document.getElementById('errors-container');
     if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-    if (debugMode) showJson('errors-output', { error: String(err) });
+
   }
 }
 
@@ -701,10 +706,10 @@ async function refreshCombinedHistory() {
     const data = await getJson('/api/history/combined?days=' + encodeURIComponent(days));
     console.log('refreshCombinedHistory: received', (data.events || []).length, 'events');
     renderHistoryMap(data.events || [], { connectDots, highlightLatest });
-    if (debugMode) showJson('history-output', data);
+
   } catch (err) {
     console.error('refreshCombinedHistory: error', err);
-    if (debugMode) showJson('history-output', { error: String(err) });
+
   }
 }
 
@@ -718,12 +723,12 @@ async function listGoogleTargets(showFeedback = true) {
     if (showFeedback) {
       setGoogleFeedback(count > 0 ? 'Loaded ' + count + ' Google target' + (count === 1 ? '' : 's') + '.' : 'No Google targets were returned.');
     }
-    if (debugMode) showJson('google-output', data);
+
   } catch (err) {
     if (showFeedback) {
       setGoogleFeedback(String(err), true);
     }
-    if (debugMode) showJson('google-output', { error: String(err) });
+
   }
 }
 
@@ -731,13 +736,13 @@ async function refreshGoogleKeys() {
   try {
     const data = await postJson('/api/google/refresh-keys', {});
     setGoogleFeedback('Google keys refreshed successfully at ' + new Date().toLocaleTimeString());
-    if (debugMode) showJson('google-output', data);
+
     await listGoogleTargets(false);
     refreshGoogleTargetOptions();
     await refreshStatus();
   } catch (err) {
     setGoogleFeedback(String(err), true);
-    if (debugMode) showJson('google-output', { error: String(err) });
+
   }
 }
 
@@ -787,19 +792,6 @@ async function fetchAllSelected() {
     setOverviewGoogleFeedback('Fetched selected items successfully. Operations=' + successCount + '.');
   }
 
-  if (debugMode) {
-    showJson('google-output', {
-      action: 'fetch_selected',
-      selected: {
-        apple: appleSelected,
-        google_compounds: googleCompoundsSelected,
-        google_trackers: googleTrackersSelected,
-      },
-      success_count: successCount,
-      failures,
-    });
-  }
-
   await refreshStatus();
   await refreshCombinedHistory();
   await refreshErrors();
@@ -822,17 +814,17 @@ async function refreshGoogleKeysForSelected() {
     await refreshStatus();
   } catch (err) {
     setOverviewGoogleFeedback(String(err), true);
-    if (debugMode) showJson('google-output', { error: String(err), action: 'refresh_keys_selected' });
+
   }
 }
 
 async function refreshAppleLocations() {
   try {
     const data = await postJson('/api/apple/fetch', { days: 7 });
-    if (debugMode) showJson('apple-output', data);
+
     await refreshStatus();
   } catch (err) {
-    if (debugMode) showJson('apple-output', { error: String(err) });
+
   }
 }
 
@@ -893,11 +885,6 @@ function initDashboard() {
   if (googleExpandCompounds) {
     googleExpandCompounds.addEventListener('change', () => {
       refreshGoogleTargetOptions();
-      if (debugMode) showJson('google-output', {
-        google_targets: lastGoogleTargets.length,
-        google_compounds: lastGoogleCompounds.length,
-        include_compound_pieces: googleExpandCompounds.checked
-      });
     });
   }
 
@@ -906,14 +893,26 @@ function initDashboard() {
   if (refreshGoogleKeysBtn) {
     refreshGoogleKeysBtn.addEventListener('click', withLoading(refreshGoogleKeysBtn, async () => {
       try {
-        const data = await postJson('/api/google/refresh-keys', {});
-        setGoogleFeedback('Google keys refreshed successfully at ' + new Date().toLocaleTimeString());
-        if (debugMode) showJson('google-output', data);
-        await listGoogleTargets(false);
+        const data = await postJson('/api/google/refresh-keys', { force_upload: true });
+        const pruned = data.pruned || {};
+        const prunedCanonicIds = pruned.pruned_canonic_ids || 0;
+        const prunedCompounds = pruned.pruned_compounds || 0;
+        const prunedTargets = pruned.pruned_targets || 0;
+        let feedbackMsg = 'Google keys refreshed successfully at ' + new Date().toLocaleTimeString();
+        if (prunedCanonicIds > 0 || prunedCompounds > 0 || prunedTargets > 0) {
+          const parts = [];
+          if (prunedCanonicIds > 0) parts.push(prunedCanonicIds + ' stale canonic id' + (prunedCanonicIds !== 1 ? 's' : '') + ' removed');
+          if (prunedCompounds > 0) parts.push(prunedCompounds + ' stale compound' + (prunedCompounds !== 1 ? 's' : '') + ' removed');
+          if (prunedTargets > 0) parts.push(prunedTargets + ' stale target' + (prunedTargets !== 1 ? 's' : '') + ' removed');
+          feedbackMsg += ' | ' + parts.join(', ');
+        }
+        setGoogleFeedback(feedbackMsg);
+    
+        await refreshTags();
         await refreshStatus();
       } catch (err) {
         setGoogleFeedback(String(err), true);
-        if (debugMode) showJson('google-output', { error: String(err) });
+    
       }
     }));
   }

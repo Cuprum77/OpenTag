@@ -13,7 +13,6 @@
       <nav class="inline-tabs">
         <div class="tab-inner"><button class="tab-btn active" data-tab="overview">Overview</button></div>
         <div class="tab-inner"><button class="tab-btn" data-tab="keys">Keys</button></div>
-        <div class="tab-inner"><button class="tab-btn" data-tab="debug">Debug</button></div>
       </nav>
       <h1>OpenTag Server</h1>
     </div>
@@ -154,50 +153,7 @@
       </div>
     </section>
 
-    <!-- DEBUG TAB -->
-    <section class="tab-content" id="tab-debug">
-      <div class="debug-layout">
-        <div class="card">
-          <h2>Debug Mode</h2>
-          <label class="debug-toggle">
-            <input type="checkbox" id="debug-mode-toggle">
-            <span>Show raw JSON output</span>
-          </label>
-          <p class="hint">When enabled, raw JSON responses from all API endpoints will be displayed below.</p>
-        </div>
-
-        <div class="card debug-panel" id="debug-tags-panel" style="display:none">
-          <h2>Tags (Raw JSON)</h2>
-          <pre id="tags-output"></pre>
-        </div>
-
-        <div class="card debug-panel" id="debug-status-panel" style="display:none">
-          <h2>Fetch Status (Raw JSON)</h2>
-          <pre id="status-output"></pre>
-        </div>
-
-        <div class="card debug-panel" id="debug-errors-panel" style="display:none">
-          <h2>Errors (Raw JSON)</h2>
-          <pre id="errors-output"></pre>
-        </div>
-
-        <div class="card debug-panel" id="debug-history-panel" style="display:none">
-          <h2>Combined History (Raw JSON)</h2>
-          <pre id="history-output"></pre>
-        </div>
-
-        <div class="card debug-panel" id="debug-apple-panel" style="display:none">
-          <h2>Apple Fetch (Raw JSON)</h2>
-          <pre id="apple-output"></pre>
-        </div>
-
-        <div class="card debug-panel" id="debug-google-panel" style="display:none">
-          <h2>Google Fetch (Raw JSON)</h2>
-          <pre id="google-output"></pre>
-        </div>
-      </div>
-    </section>
-  </main>
+      </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/static/dashboard.js"></script>

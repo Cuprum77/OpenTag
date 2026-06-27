@@ -241,6 +241,282 @@ def extract_google_compounds(secrets_payload):
     return compounds
 
 
+def _get_cached_canonic_ids(secrets_payload):
+    """Read the canonic_ids_v1 cache from secrets.json.
+
+    Returns a dict mapping canonic_id (UUID) -> name, and a set of all names.
+    """
+    by_id = {}
+    names = set()
+    cache_blob = secrets_payload.get("canonic_ids_v1")
+    if not cache_blob:
+        return by_id, names
+
+    cache_data = cache_blob
+    if isinstance(cache_blob, str):
+        try:
+            cache_data = json.loads(cache_blob)
+        except json.JSONDecodeError:
+            return by_id, names
+
+    if not isinstance(cache_data, dict):
+        return by_id, names
+
+    entries = cache_data.get("entries") or []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        canonic = entry.get("canonic_id")
+        name = entry.get("name")
+        if canonic:
+            by_id[canonic] = name or "Unknown"
+        if name and name != "Unknown":
+            names.add(name)
+
+    return by_id, names
+
+
+def _capture_canonic_state(secrets_path):
+    """Capture the full state of canonic_ids_v1 cache before a refresh.
+
+    Returns a dict mapping canonic_id -> {"name": ..., "last_seen": ...},
+    or None if no cache exists.
+    """
+    if not secrets_path or not secrets_path.exists():
+        return None
+    try:
+        payload = _json_load(secrets_path)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    cache_blob = payload.get("canonic_ids_v1")
+    if not cache_blob:
+        return None
+
+    cache_data = cache_blob
+    if isinstance(cache_blob, str):
+        try:
+            cache_data = json.loads(cache_blob)
+        except json.JSONDecodeError:
+            return None
+
+    if not isinstance(cache_data, dict):
+        return None
+
+    state = {}
+    entries = cache_data.get("entries") or []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        cid = entry.get("canonic_id")
+        if cid:
+            state[cid] = {
+                "name": entry.get("name", "Unknown"),
+                "last_seen": entry.get("last_seen"),
+            }
+    return state
+
+
+def prune_stale_google_compounds(secrets_path, refresh_payload, canonic_state_before=None):
+    """Remove compounds and targets from secrets.json that no longer exist on Google's side.
+
+    After a refresh, the external script updates canonic_ids_v1 with the current
+    device list. Entries whose last_seen timestamp was updated are alive; entries
+    whose last_seen stayed the same (or are missing) are stale.
+
+    Args:
+        secrets_path: Path to secrets.json
+        refresh_payload: Response from refresh_google_announcements
+        canonic_state_before: dict mapping canonic_id -> {"name": ..., "last_seen": ...}
+                              captured BEFORE refresh. Entries not updated during refresh
+                              will have unchanged last_seen.
+
+    Returns:
+        dict with counts: {pruned_canonic_ids: int, pruned_compounds: int, pruned_targets: int}
+    """
+    result = {"pruned_canonic_ids": 0, "pruned_compounds": 0, "pruned_targets": 0}
+
+    if not secrets_path or not secrets_path.exists():
+        return result
+
+    try:
+        payload = _json_load(secrets_path)
+    except Exception:
+        return result
+    if not isinstance(payload, dict):
+        return result
+
+    # Determine which canonic IDs are still alive
+    alive_canonic_ids = set()
+    alive_names = set()
+
+    if canonic_state_before:
+        # Read current state after refresh
+        by_id_after, names_after = _get_cached_canonic_ids(payload)
+
+        # Build last_seen map from current cache
+        last_seen_after = {}
+        cache_blob = payload.get("canonic_ids_v1")
+        if cache_blob:
+            cache_data = cache_blob
+            if isinstance(cache_blob, str):
+                try:
+                    cache_data = json.loads(cache_blob)
+                except json.JSONDecodeError:
+                    cache_data = {}
+            if isinstance(cache_data, dict):
+                for entry in cache_data.get("entries") or []:
+                    if isinstance(entry, dict):
+                        cid = entry.get("canonic_id")
+                        ls = entry.get("last_seen")
+                        if cid and ls is not None:
+                            last_seen_after[cid] = ls
+
+        # Entries whose last_seen changed (or are new) are alive
+        for cid, name in by_id_after.items():
+            before_info = canonic_state_before.get(cid)
+            after_ls = last_seen_after.get(cid)
+            before_ls = before_info["last_seen"] if before_info else None
+
+            if before_ls is None:
+                # New entry - alive
+                alive_canonic_ids.add(cid)
+            elif after_ls is not None and after_ls != before_ls:
+                # last_seen updated - alive
+                alive_canonic_ids.add(cid)
+            # else: last_seen unchanged - stale
+
+        # Also consider entries with updated names as alive (edge case)
+        for cid in alive_canonic_ids:
+            name = by_id_after.get(cid)
+            if name and name != "Unknown":
+                alive_names.add(name)
+    else:
+        # No before snapshot - use all cached entries as alive (conservative)
+        by_id, names = _get_cached_canonic_ids(payload)
+        alive_canonic_ids = set(by_id.keys())
+        alive_names = names
+
+    if not alive_canonic_ids and not alive_names:
+        return result
+
+    pruned_canonic_ids = 0
+    pruned_compounds = 0
+    pruned_targets = 0
+
+    # Prune stale canonic_ids_v1 entries
+    cache_blob = payload.get("canonic_ids_v1")
+    if cache_blob and canonic_state_before:
+        cache_data = cache_blob
+        is_string_cache = isinstance(cache_blob, str)
+        if is_string_cache:
+            try:
+                cache_data = json.loads(cache_blob)
+            except json.JSONDecodeError:
+                cache_data = {}
+
+        if isinstance(cache_data, dict):
+            entries = cache_data.get("entries") or []
+            alive_entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    pruned_canonic_ids += 1
+                    continue
+                cid = entry.get("canonic_id")
+                if cid and cid in alive_canonic_ids:
+                    alive_entries.append(entry)
+                else:
+                    pruned_canonic_ids += 1
+
+            cache_data["entries"] = alive_entries
+            if is_string_cache:
+                payload["canonic_ids_v1"] = json.dumps(cache_data)
+            elif not alive_entries:
+                payload.pop("canonic_ids_v1", None)
+
+    # Prune stale compounds
+    compounds_blob = payload.get("compound_trackers_v1")
+    if compounds_blob:
+        compounds_data = compounds_blob
+        was_string = isinstance(compounds_blob, str)
+        if was_string:
+            try:
+                compounds_data = json.loads(compounds_blob)
+            except json.JSONDecodeError:
+                compounds_data = {}
+
+        if isinstance(compounds_data, dict) and "compounds" in compounds_data:
+            compounds = compounds_data["compounds"]
+            if isinstance(compounds, dict):
+                stale_compound_ids = []
+                for compound_id, info in compounds.items():
+                    if not isinstance(info, dict):
+                        stale_compound_ids.append(compound_id)
+                        continue
+
+                    subtags = info.get("subtags") or []
+
+                    # Check if any subtag still references an alive canonic ID
+                    # Match by canonic_id first (more reliable), then by name
+                    is_stale = True
+                    for subtag in subtags:
+                        if isinstance(subtag, dict):
+                            subtag_cid = subtag.get("canonic_id", "")
+                            if subtag_cid and subtag_cid in alive_canonic_ids:
+                                is_stale = False
+                                break
+                            subtag_name = subtag.get("name", "")
+                            if subtag_name and subtag_name in alive_names:
+                                is_stale = False
+                                break
+
+                    if is_stale:
+                        stale_compound_ids.append(compound_id)
+
+                for cid in stale_compound_ids:
+                    del compounds[cid]
+                    pruned_compounds += 1
+
+                if was_string:
+                    payload["compound_trackers_v1"] = json.dumps(compounds_data)
+                elif not compounds:
+                    payload.pop("compound_trackers_v1", None)
+
+    # Prune stale non-compound targets
+    targets_blob = payload.get("targets")
+    if isinstance(targets_blob, list):
+        stale_indices = []
+        for idx, target in enumerate(targets_blob):
+            if not isinstance(target, dict):
+                stale_indices.append(idx)
+                continue
+            canonic = target.get("canonic_id") or target.get("canonicId") or ""
+            label = target.get("label") or ""
+            is_stale = True
+            if canonic and canonic in alive_canonic_ids:
+                is_stale = False
+            elif label and label in alive_names:
+                is_stale = False
+            if is_stale:
+                stale_indices.append(idx)
+
+        for idx in reversed(stale_indices):
+            del targets_blob[idx]
+            pruned_targets += 1
+
+    if pruned_canonic_ids > 0 or pruned_compounds > 0 or pruned_targets > 0:
+        _json_dump(secrets_path, payload)
+
+    result["pruned_canonic_ids"] = pruned_canonic_ids
+    result["pruned_compounds"] = pruned_compounds
+    result["pruned_targets"] = pruned_targets
+    return result
+
+
+
+
 def merge_apple_keys(accessories_rows):
     seen = {}
     for row in accessories_rows:

@@ -3,7 +3,7 @@ import logging
 
 from threading import Thread
 
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request, send_file
 
 from auth import login_required
 from fetch_apple import fetch_apple_locations
@@ -23,11 +23,14 @@ from storage import (
     get_alerts,
     list_user_files,
     merge_apple_keys,
+    prune_stale_google_compounds,
+    _capture_canonic_state,
     read_user_accessories,
     read_user_secrets,
     save_accessories_upload,
     save_secrets_upload,
     set_fetch_status,
+    user_dir,
     user_secrets_path,
 )
 
@@ -340,18 +343,42 @@ def google_refresh_keys():
         return jsonify({"error": "secrets.json is required"}), 400
 
     body = request.get_json(silent=True) or {}
-    force_upload = bool(body.get("force_upload", False))
+    force_upload = True  # Always force on manual refresh; 24h TTL only applies to auto-refresh
     redis_client = current_app.config["REDIS"]
 
     try:
         logger.info("Refreshing Google keys for user %s (force=%s)", username, force_upload)
+
+        # Capture canonic_ids state BEFORE refresh
+        # This lets us detect which entries were NOT updated (i.e., stale)
+        canonic_state_before = _capture_canonic_state(path)
+        logger.info("Captured %d canonic_id entries before refresh for user %s", len(canonic_state_before or {}), username)
+
         payload = refresh_google_announcements(path, force_upload=force_upload)
+        logger.info("Refresh payload for user %s: skipped=%s, keys=%s", username, payload.get("skipped", False) if isinstance(payload, dict) else "N/A", list(payload.keys()) if isinstance(payload, dict) else type(payload))
+
+        # Prune stale compounds, targets, and canonic_ids no longer reported by Google
+        # Only prune if the refresh actually happened (not skipped due to 24h TTL)
+        prune_result = {"pruned_canonic_ids": 0, "pruned_compounds": 0, "pruned_targets": 0}
+        if isinstance(payload, dict) and not payload.get("skipped", False):
+            canonic_state_after = _capture_canonic_state(path)
+            logger.info("Captured %d canonic_id entries after refresh for user %s", len(canonic_state_after or {}), username)
+            # Log which entries changed
+            if canonic_state_before and canonic_state_after:
+                changed = {k: v for k, v in canonic_state_after.items() if canonic_state_before.get(k) != v}
+                unchanged = {k for k in canonic_state_before if k in canonic_state_after and canonic_state_before[k] == canonic_state_after[k]}
+                new_entries = set(canonic_state_after.keys()) - set(canonic_state_before.keys())
+                logger.info("Refresh: %d changed, %d unchanged, %d new entries for user %s", len(changed), len(unchanged), len(new_entries), username)
+            prune_result = prune_stale_google_compounds(path, payload, canonic_state_before=canonic_state_before)
+            logger.info("Pruned %d canonic_ids, %d compounds, and %d targets for user %s", prune_result.get("pruned_canonic_ids", 0), prune_result.get("pruned_compounds", 0), prune_result.get("pruned_targets", 0), username)
+
         status_payload = {
             "provider": "google",
             "ok": True,
             "kind": "refresh_keys",
             "timestamp_unix": int(time.time()),
             "details": payload,
+            "pruned": prune_result,
         }
         set_fetch_status(redis_client, username, "google", status_payload)
         logger.info("Google key refresh successful for user %s", username)
@@ -531,3 +558,22 @@ def clear_alerts():
     redis_client = current_app.config["REDIS"]
     removed = purge_alerts(redis_client, username)
     return jsonify({"ok": True, "removed": removed})
+
+
+@api_bp.get("/keyfiles/<path:filename>/download")
+@login_required
+def keyfiles_download(filename):
+    from pathlib import Path
+    username = g.user["username"]
+    # Prevent directory traversal
+    if filename != Path(filename).name:
+        return jsonify({"error": "invalid filename"}), 400
+    # Restrict to known file patterns
+    is_secrets = filename == "secrets.json"
+    is_accessories = filename.startswith("accessories_") and filename.endswith(".json")
+    if not (is_secrets or is_accessories):
+        return jsonify({"error": "unsupported file type"}), 400
+    path = user_dir(username) / filename
+    if not path.exists():
+        return jsonify({"error": "file not found"}), 404
+    return send_file(str(path), as_attachment=True, download_name=filename)
