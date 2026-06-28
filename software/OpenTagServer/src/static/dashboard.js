@@ -34,6 +34,7 @@ let markerLayer = null;
 let polylineLayer = null;
 let lastGoogleTargets = [];
 let lastGoogleCompounds = [];
+let selectedDeviceTags = new Set(); // Track selected tags for device creation
 
 function initMap() {
   const mapHost = document.getElementById('map');
@@ -522,7 +523,315 @@ async function refreshTags() {
   }
 }
 
-// ── Status rendering (structured badges) ──
+// ── Devices ──
+
+let allDeviceTags = []; // All available tags for the devices tab
+
+async function refreshDevices() {
+  try {
+    const [devicesData, tagsData] = await Promise.all([
+      getJson('/api/devices'),
+      getJson('/api/tags/raw')
+    ]);
+    renderDevices(devicesData.devices || []);
+    renderDevicesTagList(tagsData);
+  } catch (err) {
+    const container = document.getElementById('devices-container');
+    if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">Failed to load devices.</p>';
+  }
+}
+
+function renderDevicesTagList(tagsData) {
+  const container = document.getElementById('devices-tag-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  allDeviceTags = [];
+  const appleTags = tagsData.apple_tags || [];
+  const googleCompounds = tagsData.google_compounds || [];
+
+  for (const tag of appleTags) {
+    allDeviceTags.push({
+      provider: 'apple',
+      tag_id: tag.id || tag.source_file || 'apple-' + Math.random().toString(36).slice(2, 8),
+      tag_name: tag.name || ('Tracker #' + tag.id)
+    });
+  }
+  for (const compound of googleCompounds) {
+    allDeviceTags.push({
+      provider: 'google',
+      tag_id: compound.compound_id || compound.base_name,
+      tag_name: compound.base_name || compound.compound_id
+    });
+  }
+
+  if (allDeviceTags.length === 0) {
+    container.innerHTML = '<p class="hint">No tags available. Upload key files first.</p>';
+    return;
+  }
+
+  for (const tag of allDeviceTags) {
+    const item = document.createElement('label');
+    item.className = 'devices-tag-item ' + tag.provider;
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = tag.tag_id;
+    if (selectedDeviceTags.has(tag.tag_id)) {
+      cb.checked = true;
+    }
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        selectedDeviceTags.add(tag.tag_id);
+      } else {
+        selectedDeviceTags.delete(tag.tag_id);
+      }
+    });
+
+    const name = document.createElement('span');
+    name.className = 'tag-item-name';
+    name.textContent = tag.tag_name;
+
+    const provider = document.createElement('span');
+    provider.className = 'tag-item-provider ' + tag.provider;
+    provider.textContent = tag.provider;
+
+    item.appendChild(cb);
+    item.appendChild(name);
+    item.appendChild(provider);
+    container.appendChild(item);
+  }
+}
+
+function renderDevices(devices) {
+  const container = document.getElementById('devices-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (devices.length === 0) {
+    container.innerHTML = '<p class="hint">No devices yet. Select tags above and click "+ Create Device".</p>';
+    return;
+  }
+
+  for (const device of devices) {
+    const card = document.createElement('div');
+    card.className = 'device-card';
+    card.dataset.deviceId = device.id;
+
+    // Color accent bar
+    const accent = document.createElement('div');
+    accent.className = 'device-accent';
+    accent.style.background = device.color || '#888888';
+    card.appendChild(accent);
+
+    // Device name
+    const name = document.createElement('div');
+    name.className = 'device-name';
+    name.textContent = device.name;
+    card.appendChild(name);
+
+    // Tag chips
+    const tagsDiv = document.createElement('div');
+    tagsDiv.className = 'device-tags';
+    const tags = device.tags || [];
+    for (const tag of tags) {
+      const chip = document.createElement('span');
+      chip.className = 'device-tag-chip ' + (tag.provider || '');
+      chip.textContent = tag.tag_name || tag.tag_id || 'unknown';
+      tagsDiv.appendChild(chip);
+    }
+    card.appendChild(tagsDiv);
+
+    // Delete button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.title = 'Delete device';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deleteDeviceHandler(device.id, card));
+    card.appendChild(deleteBtn);
+
+    container.appendChild(card);
+  }
+}
+
+async function deleteDeviceHandler(deviceId, cardEl) {
+  try {
+    const res = await fetch('/api/devices/' + encodeURIComponent(deviceId), {
+      method: 'DELETE',
+      credentials: 'same-origin'
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to delete device');
+    }
+    cardEl.remove();
+    if (!document.querySelector('.device-card')) {
+      refreshDevices();
+    }
+  } catch (err) {
+    alert('Failed to delete device: ' + err);
+  }
+}
+
+// ── Build Device Modal ──
+
+function openBuildDeviceModal() {
+  if (selectedDeviceTags.size < 2) {
+    alert('Please select at least 2 tags to create a device.');
+    return;
+  }
+  _populateBuildModal();
+  document.getElementById('build-device-modal').style.display = 'flex';
+}
+
+function closeBuildDeviceModal() {
+  document.getElementById('build-device-modal').style.display = 'none';
+}
+
+function _populateBuildModal() {
+  // Reset form
+  document.getElementById('device-name-input').value = '';
+  const swatches = document.querySelectorAll('.color-swatch');
+  swatches.forEach(s => s.classList.remove('active'));
+  if (swatches[0]) swatches[0].classList.add('active');
+
+  // Reset custom color input
+  const customColorInput = document.getElementById('custom-color-input');
+  if (customColorInput) {
+    customColorInput.classList.remove('active');
+    customColorInput.value = swatches[0].dataset.color;
+  }
+
+  // Render only selected tags in the checklist
+  const checklist = document.getElementById('device-tag-checklist');
+  checklist.innerHTML = '';
+
+  const selectedTags = allDeviceTags.filter(t => selectedDeviceTags.has(t.tag_id));
+  for (const tag of selectedTags) {
+    const item = document.createElement('div');
+    item.className = 'tag-checklist-item ' + tag.provider;
+
+    const label = document.createElement('span');
+    label.className = 'tag-label';
+    label.textContent = tag.tag_name;
+
+    const provider = document.createElement('span');
+    provider.className = 'tag-provider ' + tag.provider;
+    provider.textContent = tag.provider;
+
+    item.appendChild(label);
+    item.appendChild(provider);
+    checklist.appendChild(item);
+  }
+
+  _updateDeviceTagCount();
+}
+
+function _updateDeviceTagCount() {
+  const labelEl = document.getElementById('device-tags-label');
+  const createBtn = document.getElementById('modal-create-btn');
+  const nameInput = document.getElementById('device-name-input');
+
+  if (labelEl) {
+    labelEl.textContent = 'Selected tags: ' + selectedDeviceTags.size;
+  }
+
+  // Enable create button only if name is provided and at least 2 tags selected
+  createBtn.disabled = !(selectedDeviceTags.size >= 2 && nameInput.value.trim());
+}
+
+function _getSelectedColor() {
+  const activeSwatch = document.querySelector('.color-swatch.active');
+  const customColorInput = document.getElementById('custom-color-input');
+  if (customColorInput && customColorInput.classList.contains('active')) {
+    return customColorInput.value;
+  }
+  if (activeSwatch) return activeSwatch.dataset.color;
+  return '#888888';
+}
+
+async function createDevice() {
+  const name = document.getElementById('device-name-input').value.trim();
+  const color = _getSelectedColor();
+
+  const selectedTags = allDeviceTags
+    .filter(t => selectedDeviceTags.has(t.tag_id))
+    .map(t => ({
+      provider: t.provider,
+      tag_id: t.tag_id,
+      tag_name: t.tag_name
+    }));
+
+  if (!name || selectedTags.length < 2) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/devices', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color, tags: selectedTags })
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to create device');
+    }
+    closeBuildDeviceModal();
+    await refreshDevices();
+  } catch (err) {
+    alert('Failed to create device: ' + err);
+  }
+}
+
+// ── Modal event setup ──
+
+function initBuildDeviceModal() {
+  const modal = document.getElementById('build-device-modal');
+  if (!modal) return;
+
+  // Open button
+  const openBtn = document.getElementById('build-device-btn');
+  if (openBtn) openBtn.addEventListener('click', openBuildDeviceModal);
+
+  // Close buttons
+  const closeBtn = document.getElementById('modal-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeBuildDeviceModal);
+  const cancelBtn = document.getElementById('modal-cancel-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeBuildDeviceModal);
+
+  // Create button
+  const createBtn = document.getElementById('modal-create-btn');
+  if (createBtn) createBtn.addEventListener('click', createDevice);
+
+  // Color picker
+  const swatches = document.querySelectorAll('.color-swatch');
+  const customColorInput = document.getElementById('custom-color-input');
+  swatches.forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      swatches.forEach(s => s.classList.remove('active'));
+      swatch.classList.add('active');
+      if (customColorInput) customColorInput.classList.remove('active');
+      if (customColorInput) customColorInput.value = swatch.dataset.color;
+    });
+  });
+  if (customColorInput) {
+    customColorInput.addEventListener('input', () => {
+      swatches.forEach(s => s.classList.remove('active'));
+      customColorInput.classList.add('active');
+    });
+  }
+
+  // Name input change - revalidate create button
+  const nameInput = document.getElementById('device-name-input');
+  if (nameInput) nameInput.addEventListener('input', () => _updateDeviceTagCount());
+
+  // Close on overlay click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeBuildDeviceModal();
+  });
+}
 function renderStatus(data) {
   const container = document.getElementById('status-container');
   if (!container) return;
@@ -1007,9 +1316,11 @@ function initDashboard() {
 
   refreshFiles();
   refreshTags();
+  refreshDevices();
   refreshStatus();
   refreshErrors();
   refreshCombinedHistory();
+  initBuildDeviceModal();
 }
 
 if (document.readyState === 'loading') {

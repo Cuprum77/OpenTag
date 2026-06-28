@@ -1,5 +1,6 @@
 import time
 import logging
+import uuid
 
 from threading import Thread
 
@@ -32,6 +33,10 @@ from storage import (
     set_fetch_status,
     user_dir,
     user_secrets_path,
+    get_devices,
+    add_device,
+    update_device,
+    delete_device,
 )
 
 logger = logging.getLogger(__name__)
@@ -577,3 +582,100 @@ def keyfiles_download(filename):
     if not path.exists():
         return jsonify({"error": "file not found"}), 404
     return send_file(str(path), as_attachment=True, download_name=filename)
+
+
+# ── Devices ──
+
+@api_bp.get("/devices")
+@login_required
+def devices_list():
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    devices = get_devices(redis_client, username)
+    return jsonify({"devices": devices})
+
+
+@api_bp.post("/devices")
+@login_required
+def devices_create():
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    body = request.get_json(silent=True) or {}
+    name = (body.get("name") or "").strip()
+    color = body.get("color") or "#888888"
+    tags = body.get("tags") or []
+
+    if not name:
+        return jsonify({"error": "device name is required"}), 400
+    if not isinstance(tags, list) or len(tags) < 2:
+        return jsonify({"error": "at least 2 tags must be selected"}), 400
+
+    # Validate tag entries
+    validated_tags = []
+    for tag in tags:
+        if not isinstance(tag, dict):
+            continue
+        provider = tag.get("provider")
+        tag_id = tag.get("tag_id")
+        tag_name = tag.get("tag_name", "")
+        if provider in ("apple", "google") and tag_id:
+            validated_tags.append({
+                "provider": provider,
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+            })
+
+    if len(validated_tags) < 2:
+        return jsonify({"error": "at least 2 valid tags must be selected"}), 400
+
+    device = {
+        "id": uuid.uuid4().hex[:12],
+        "name": name,
+        "color": color,
+        "tags": validated_tags,
+        "created_unix": int(time.time()),
+        "updated_unix": int(time.time()),
+    }
+    add_device(redis_client, username, device)
+    logger.info("Created device '%s' (%d tags) for user %s", name, len(validated_tags), username)
+    return jsonify({"ok": True, "device": device}), 201
+
+
+@api_bp.put("/devices/<device_id>")
+@login_required
+def devices_update(device_id):
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    body = request.get_json(silent=True) or {}
+
+    # Only allow updating name, color, or tags
+    allowed = {}
+    if "name" in body:
+        allowed["name"] = body["name"].strip() if isinstance(body["name"], str) else body["name"]
+    if "color" in body:
+        allowed["color"] = body["color"]
+    if "tags" in body:
+        allowed["tags"] = body["tags"]
+
+    if not allowed:
+        return jsonify({"error": "no valid fields to update"}), 400
+
+    update_device(redis_client, username, device_id, allowed)
+    logger.info("Updated device '%s' for user %s", device_id, username)
+    devices = get_devices(redis_client, username)
+    device = next((d for d in devices if d.get("id") == device_id), None)
+    if not device:
+        return jsonify({"error": "device not found"}), 404
+    return jsonify({"ok": True, "device": device})
+
+
+@api_bp.delete("/devices/<device_id>")
+@login_required
+def devices_delete(device_id):
+    username = g.user["username"]
+    redis_client = current_app.config["REDIS"]
+    deleted = delete_device(redis_client, username, device_id)
+    if not deleted:
+        return jsonify({"error": "device not found"}), 404
+    logger.info("Deleted device '%s' for user %s", device_id, username)
+    return jsonify({"ok": True, "deleted": device_id})

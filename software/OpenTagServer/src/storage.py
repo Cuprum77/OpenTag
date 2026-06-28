@@ -777,3 +777,88 @@ def purge_old_alerts(redis_client, username, max_age_seconds):
         pipe.rpush(key, *kept)
     pipe.execute()
     return removed
+
+
+# ── Devices ──
+
+def _devices_key(username):
+    return f"user:{username}:devices"
+
+
+def save_devices(redis_client, username, devices):
+    """Save the full list of devices for a user.
+
+    Args:
+        redis_client: Redis connection
+        username: Username
+        devices: List of device dicts, each with {id, name, color, tags: [{provider, tag_id, tag_name}], created_unix, updated_unix}
+    """
+    redis_client.set(_devices_key(username), json.dumps(devices))
+
+
+def get_devices(redis_client, username):
+    """Get the list of devices for a user.
+
+    Returns:
+        List of device dicts, or empty list if none exist.
+    """
+    raw = redis_client.get(_devices_key(username))
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def add_device(redis_client, username, device):
+    """Add a new device to the user's device list.
+
+    Args:
+        redis_client: Redis connection
+        username: Username
+        device: Device dict with {id, name, color, tags}
+    """
+    devices = get_devices(redis_client, username)
+    devices.append(device)
+    save_devices(redis_client, username, devices)
+
+
+def update_device(redis_client, username, device_id, updates):
+    """Update a device by ID.
+
+    Args:
+        redis_client: Redis connection
+        username: Username
+        device_id: Device ID to update
+        updates: Dict of fields to update
+    """
+    devices = get_devices(redis_client, username)
+    for device in devices:
+        if device.get("id") == device_id:
+            device.update(updates)
+            device["updated_unix"] = int(time.time())
+            break
+    save_devices(redis_client, username, devices)
+
+
+def delete_device(redis_client, username, device_id):
+    """Delete a device by ID.
+
+    Args:
+        redis_client: Redis connection
+        username: Username
+        device_id: Device ID to delete
+
+    Returns:
+        True if deleted, False if not found.
+    """
+    devices = get_devices(redis_client, username)
+    new_devices = [d for d in devices if d.get("id") != device_id]
+    if len(new_devices) == len(devices):
+        return False
+    save_devices(redis_client, username, new_devices)
+    return True

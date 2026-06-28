@@ -651,11 +651,6 @@ input:disabled {
   cursor: not-allowed;
 }
 
-button + button,
-button + form {
-  margin-top: 8px;
-}
-
 /* FORMS */
 form {
   margin-top: 10px;
@@ -1043,4 +1038,445 @@ button.loading {
     padding: 6px 12px;
     gap: 8px;
   }
+}
+
+/* ── Devices Tab ── */
+.devices-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+
+.devices-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.devices-panel > h2 {
+  flex-shrink: 0;
+}
+
+.devices-panel > .hint {
+  flex-shrink: 0;
+}
+
+.devices-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.devices-tag-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-tag);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.devices-tag-item:hover {
+  background: var(--tab-hover);
+}
+
+.devices-tag-item.apple {
+  border-left: 3px solid var(--success);
+}
+
+.devices-tag-item.google {
+  border-left: 3px solid #1f78ff;
+}
+
+.devices-tag-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.devices-tag-item .tag-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.devices-tag-item .tag-item-provider {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.devices-tag-item .tag-item-provider.apple {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--success);
+}
+
+.devices-tag-item .tag-item-provider.google {
+  background: rgba(31, 120, 255, 0.15);
+  color: #1f78ff;
+}
+
+/* Device cards */
+.devices-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.device-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-tag);
+  transition: background 0.25s, border-color 0.25s;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.device-card .device-accent {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+
+.device-card .device-name {
+  font-weight: 600;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+.device-card .delete-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-dialog {
+  background: var(--bg-card);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.modal-close-btn:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-section label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+}
+
+.modal-section input[type="text"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.color-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.color-swatch.active {
+  border-color: var(--text);
+  transform: scale(1.15);
+}
+
+.custom-color-input {
+  width: 28px;
+  height: 28px;
+  border: 2px dashed var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  background: none;
+  transition: border-color 0.2s;
+}
+
+.custom-color-input:hover {
+  border-color: var(--accent);
+}
+
+.custom-color-input.active {
+  border-style: solid;
+  border-color: var(--text);
+}
+
+.tag-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.tag-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: default;
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.tag-checklist-item.apple {
+  border-left-color: var(--success);
+}
+
+.tag-checklist-item.google {
+  border-left-color: #1f78ff;
+}
+
+.tag-checklist-item:hover {
+  background: var(--tab-hover);
+}
+
+.tag-checklist-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tag-checklist-item .tag-label {
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.tag-checklist-item .tag-provider {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tag-checklist-item .tag-provider.apple {
+  background: rgba(24, 169, 107, 0.15);
+  color: var(--success);
+}
+
+.tag-checklist-item .tag-provider.google {
+  background: rgba(31, 120, 255, 0.15);
+  color: #1f78ff;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.modal-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  box-sizing: border-box;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.modal-btn-cancel {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.modal-btn-cancel:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+.modal-btn-create {
+  background: var(--success);
+  color: #fff;
+}
+
+.modal-btn-create:hover {
+  background: #159a60;
+}
+
+.modal-btn-create:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+body.dark .modal-btn-cancel {
+  color: var(--ink);
+}
+
+body.dark .modal-btn-create {
+  color: #fff;
+}
+
+/* Device action button */
+.device-action-btn {
+  width: 100%;
+  padding: 8px 12px;
+  margin-top: 8px;
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.device-action-btn:hover {
+  background: var(--btn-hover);
+}
+
+body.dark .device-action-btn {
+  color: #0d100d;
+}
+
+body.dark .device-action-btn:hover {
+  color: #0d100d;
+}
+
+
+/* Device tags list */
+.device-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  margin-left: 8px;
+}
+
+.device-tag-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--tab-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
+}
+
+.device-tag-chip.apple {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.device-tag-chip.google {
+  border-color: #1f78ff;
+  color: #1f78ff;
+}
+
+/* Dark mode adjustments for modal */
+body.dark .modal-dialog {
+  background: var(--bg-card);
+}
+
+body.dark .color-swatch.active {
+  border-color: #fff;
 }

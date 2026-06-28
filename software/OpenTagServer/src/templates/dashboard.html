@@ -13,6 +13,7 @@
       <nav class="inline-tabs">
         <div class="tab-inner"><button class="tab-btn active" data-tab="overview">Overview</button></div>
         <div class="tab-inner"><button class="tab-btn" data-tab="keys">Keys</button></div>
+        <div class="tab-inner"><button class="tab-btn" data-tab="devices">Devices</button></div>
       </nav>
       <h1>OpenTag Server</h1>
     </div>
@@ -153,7 +154,64 @@
       </div>
     </section>
 
-      </main>
+    <!-- DEVICES TAB -->
+    <section class="tab-content" id="tab-devices">
+      <div class="devices-layout">
+        <div class="card devices-panel">
+          <h2>Available Tags</h2>
+          <p class="hint">Select tags to combine into a device</p>
+          <div id="devices-tag-list" class="devices-tag-list"></div>
+          <button type="button" id="build-device-btn" class="device-action-btn">+ Create Device</button>
+        </div>
+
+        <div class="card devices-panel">
+          <h2>Devices</h2>
+          <div id="devices-container" class="devices-container">
+            <p class="hint">No devices yet. Select tags and click "+ Create Device".</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- BUILD DEVICE MODAL -->
+  <div id="build-device-modal" class="modal-overlay" style="display:none">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>Create Device</h2>
+        <button type="button" id="modal-close-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section">
+          <label>Device name</label>
+          <input type="text" id="device-name-input" placeholder="e.g. My Key, Commute Tracker" autocomplete="off">
+        </div>
+        <div class="modal-section">
+          <label>Color</label>
+          <div id="device-color-picker" class="color-picker">
+            <span class="color-swatch active" data-color="#4caf50" style="background:#4caf50"></span>
+            <span class="color-swatch" data-color="#1f78ff" style="background:#1f78ff"></span>
+            <span class="color-swatch" data-color="#e53935" style="background:#e53935"></span>
+            <span class="color-swatch" data-color="#ff9800" style="background:#ff9800"></span>
+            <span class="color-swatch" data-color="#9c27b0" style="background:#9c27b0"></span>
+            <span class="color-swatch" data-color="#00bcd4" style="background:#00bcd4"></span>
+            <span class="color-swatch" data-color="#795548" style="background:#795548"></span>
+            <span class="color-swatch" data-color="#607d8b" style="background:#607d8b"></span>
+            <input type="color" id="device-custom-color" class="custom-color-input" title="Pick custom color" value="#4caf50">
+          </div>
+        </div>
+        <div class="modal-section">
+          <label id="device-tags-label">Selected tags: 0</label>
+          <div id="device-tag-checklist" class="tag-checklist"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="modal-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
+        <button type="button" id="modal-create-btn" class="modal-btn modal-btn-create" disabled>Create Device</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/static/dashboard.js"></script>
