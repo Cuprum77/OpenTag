@@ -1,11 +1,11 @@
 # Ignore vendor HAL drivers and CMSIS files
-STM32WB_BT_TAG/Drivers/* linguist-vendored
-STM32WB_BT_TAG/Middlewares/* linguist-vendored
+software/STM32WB_BT_TAG/Drivers/* linguist-vendored
+software/STM32WB_BT_TAG/Middlewares/* linguist-vendored
 
 # Ignore generated system setup files
-STM32WB_BT_TAG/Core/Src/system_stm32wbxx.c linguist-vendored
-STM32WB_BT_TAG/Core/Src/sysmem.c linguist-vendored
-STM32WB_BT_TAG/Core/Src/syscalls.c linguist-vendored
+software/STM32WB_BT_TAG/Core/Src/system_stm32wbxx.c linguist-vendored
+software/STM32WB_BT_TAG/Core/Src/sysmem.c linguist-vendored
+software/STM32WB_BT_TAG/Core/Src/syscalls.c linguist-vendored
 
 # Ignore 3D CAD step files and compiled binaries
 hardware/3D/* linguist-vendored
