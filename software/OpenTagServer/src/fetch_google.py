@@ -1,4 +1,6 @@
 import json
+import re
+import time
 import os
 import subprocess
 import sys
@@ -47,4 +49,11 @@ def fetch_google_locations(auth_file, canonic_id=None, compound_name=None, timeo
     else:
         raise ValueError("canonic_id or compound_name is required")
 
-    return _run_google_script(args, timeout=max(120, timeout + 60))
+    for attempt in range(3):
+        try:
+            return _run_google_script(args, timeout=max(120, timeout + 60))
+        except RuntimeError as exc:
+            # Retry only read-side Nova transient server errors; key uploads are not retried.
+            if attempt == 2 or not re.search(r"Nova request failed \(50[0234]\)", str(exc)):
+                raise
+            time.sleep((5, 15)[attempt])

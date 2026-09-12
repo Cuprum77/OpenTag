@@ -6,6 +6,8 @@ import time
 from flask import Flask, g, jsonify, redirect, render_template, url_for
 
 from api import api_bp
+from apple_requests import AppleRequestLimiter
+from apple_worker import apple_auto_fetch_loop
 from auth import auth_bp, login_required
 from config import load_runtime_config
 from fetch_google import fetch_google_locations, refresh_google_announcements
@@ -90,114 +92,131 @@ def _google_auto_refresh_loop(app: Flask):
 
                 for username in users.keys():
                     try:
-                        now = time.time()
-                        secrets_path = user_secrets_path(username)
-                        if not secrets_path:
+                        from storage import extract_google_compounds
+                        count = len(extract_google_compounds(read_user_secrets(username) or {}))
+                        user_lock = redis_client.lock('user:' + username + ':google:worker', timeout=max(600, count * 420 + 600))
+                        if not user_lock.acquire(blocking=False):
                             continue
+                        try:
+                            now = time.time()
+                            secrets_path = user_secrets_path(username)
+                            if not secrets_path:
+                                continue
 
-                        # Key refresh (every key_refresh_hours)
-                        last_refresh_key = "user:" + username + ":meta:last_google_key_refresh"
-                        last_refresh = redis_client.get(last_refresh_key)
-                        last_refresh_ts = float(last_refresh) if last_refresh else 0
-                        if (now - last_refresh_ts) > (key_refresh_hours * 3600):
-                            logger.info("Auto-refreshing Google keys for user %s (last refresh %.0f hours ago)", username, (now - last_refresh_ts) / 3600)
-                            try:
-                                payload = refresh_google_announcements(secrets_path, force_upload=False)
-                                status_payload = {
-                                    "provider": "google",
-                                    "ok": True,
-                                    "kind": "auto_refresh_keys",
-                                    "timestamp_unix": int(now),
-                                    "details": payload,
-                                }
-                                set_fetch_status(redis_client, username, "google", status_payload)
-                                redis_client.set(last_refresh_key, str(now))
-                                logger.info("Google key refresh successful for user %s", username)
-                            except Exception as exc:
-                                logger.error("Google key refresh failed for user %s: %s", username, exc)
-                                append_alert(redis_client, username, {
-                                    "provider": "google",
-                                    "error": clean_error_message(str(exc)),
-                                    "type": "auto_key_refresh",
-                                    "target": "keys",
-                                    "timestamp_unix": int(now),
-                                })
-
-                        # Location fetch (every query_interval_min)
-                        if local_history and query_interval_min > 0:
-                            last_fetch_key = "user:" + username + ":meta:last_google_fetch"
-                            last_fetch = redis_client.get(last_fetch_key)
-                            last_fetch_ts = float(last_fetch) if last_fetch else 0
-                            if (now - last_fetch_ts) > (query_interval_min * 60):
-                                logger.info("Auto-fetching Google locations for user %s", username)
+                            # Key refresh (every key_refresh_hours)
+                            last_refresh_key = "user:" + username + ":meta:last_google_key_refresh"
+                            last_refresh = redis_client.get(last_refresh_key)
+                            last_refresh_ts = float(last_refresh) if last_refresh else 0
+                            retry_after = float(redis_client.get("user:" + username + ":meta:google_refresh_retry_after") or 0)
+                            if key_refresh_hours > 0 and (now - last_refresh_ts) > (key_refresh_hours * 3600) and now < retry_after:
+                                continue
+                            if key_refresh_hours > 0 and now >= retry_after and (now - last_refresh_ts) > (key_refresh_hours * 3600):
+                                logger.info("Auto-refreshing Google keys for user %s (last refresh %.0f hours ago)", username, (now - last_refresh_ts) / 3600)
                                 try:
-                                    secrets_payload = read_user_secrets(username)
-                                    compounds = []
-                                    if secrets_payload:
-                                        from storage import extract_google_compounds
-                                        compounds = extract_google_compounds(secrets_payload)
+                                    payload = refresh_google_announcements(secrets_path, force_upload=False)
+                                    status_payload = {
+                                        "provider": "google",
+                                        "ok": True,
+                                        "kind": "auto_refresh_keys",
+                                        "timestamp_unix": int(now),
+                                        "details": payload,
+                                    }
+                                    set_fetch_status(redis_client, username, "google", status_payload)
+                                    redis_client.set(last_refresh_key, str(time.time()))
+                                    redis_client.set("user:" + username + ":meta:google_fetch_not_before", str(time.time() + runtime.get("google_refresh_settle_seconds", 15)))
+                                    logger.info("Google key refresh successful for user %s", username)
+                                except Exception as exc:
+                                    logger.error("Google key refresh failed for user %s: %s", username, exc)
+                                    redis_client.set("user:" + username + ":meta:google_refresh_retry_after", str(time.time() + 300))
+                                    append_alert(redis_client, username, {
+                                        "provider": "google",
+                                        "error": clean_error_message(str(exc)),
+                                        "type": "auto_key_refresh",
+                                        "target": "keys",
+                                        "timestamp_unix": int(now),
+                                    })
+                                    continue
 
-                                    all_events = []
-                                    for compound in compounds:
+                            if time.time() < float(redis_client.get("user:" + username + ":meta:google_fetch_not_before") or 0):
+                                continue
+
+                            # Location fetch (every query_interval_min)
+                            if local_history and query_interval_min > 0:
+                                last_fetch_key = "user:" + username + ":meta:last_google_fetch"
+                                last_fetch = redis_client.get(last_fetch_key)
+                                last_fetch_ts = float(last_fetch) if last_fetch else 0
+                                if (now - last_fetch_ts) > (query_interval_min * 60):
+                                    logger.info("Auto-fetching Google locations for user %s", username)
+                                    try:
+                                        secrets_payload = read_user_secrets(username)
+                                        compounds = []
+                                        if secrets_payload:
+                                            from storage import extract_google_compounds
+                                            compounds = extract_google_compounds(secrets_payload)
+
+                                        all_events = []
+                                        for compound in compounds:
+                                            try:
+                                                payload = fetch_google_locations(secrets_path, compound_name=compound.get("base_name"), timeout=45)
+                                                status_payload = {
+                                                    "provider": "google",
+                                                    "ok": True,
+                                                    "kind": "auto_fetch_location",
+                                                    "timestamp_unix": int(now),
+                                                    "target": compound.get("base_name"),
+                                                    "details": payload,
+                                                }
+                                                set_fetch_status(redis_client, username, "google", status_payload)
+                                                details = payload.get("details") if isinstance(payload, dict) else None
+                                                if isinstance(details, dict):
+                                                    targets = details.get("targets", [])
+                                                    for target in targets:
+                                                        if not isinstance(target, dict):
+                                                            continue
+                                                        label = target.get("label") or target.get("resolved_device_name") or "google-tag"
+                                                        result = target.get("result", {})
+                                                        locations = result.get("locations", [])
+                                                        for loc in locations:
+                                                            if isinstance(loc, dict) and loc.get("type") == "geo":
+                                                                all_events.append({
+                                                                    "provider": "google",
+                                                                    "tag": label,
+                                                                    "latitude": loc.get("latitude"),
+                                                                    "longitude": loc.get("longitude"),
+                                                                    "timestamp_unix": int(loc.get("time_unix", 0) or 0),
+                                                                    "status": loc.get("status"),
+                                                                    "source": "google_compound",
+                                                                })
+                                            except Exception as exc:
+                                                logger.warning("Google auto-fetch failed for compound %s, user %s: %s", compound.get("base_name"), username, exc)
+                                                append_alert(redis_client, username, {
+                                                    "provider": "google",
+                                                    "error": clean_error_message(str(exc)),
+                                                    "type": "auto_fetch_error",
+                                                    "target": compound.get("base_name"),
+                                                    "timestamp_unix": int(now),
+                                                })
+
+                                        if all_events:
+                                            from storage import append_history_events
+                                            append_history_events(redis_client, username, all_events)
+                                            logger.info("Stored %d Google location events for user %s", len(all_events), username)
+
+                                        redis_client.set(last_fetch_key, str(now))
+                                    except Exception as exc:
+                                        logger.error("Google auto-fetch failed for user %s: %s", username, exc)
                                         try:
-                                            payload = fetch_google_locations(secrets_path, compound_name=compound.get("base_name"), timeout=45)
-                                            status_payload = {
-                                                "provider": "google",
-                                                "ok": True,
-                                                "kind": "auto_fetch_location",
-                                                "timestamp_unix": int(now),
-                                                "target": compound.get("base_name"),
-                                                "details": payload,
-                                            }
-                                            set_fetch_status(redis_client, username, "google", status_payload)
-                                            details = payload.get("details") if isinstance(payload, dict) else None
-                                            if isinstance(details, dict):
-                                                targets = details.get("targets", [])
-                                                for target in targets:
-                                                    if not isinstance(target, dict):
-                                                        continue
-                                                    label = target.get("label") or target.get("resolved_device_name") or "google-tag"
-                                                    result = target.get("result", {})
-                                                    locations = result.get("locations", [])
-                                                    for loc in locations:
-                                                        if isinstance(loc, dict) and loc.get("type") == "geo":
-                                                            all_events.append({
-                                                                "provider": "google",
-                                                                "tag": label,
-                                                                "latitude": loc.get("latitude"),
-                                                                "longitude": loc.get("longitude"),
-                                                                "timestamp_unix": int(loc.get("time_unix", 0) or 0),
-                                                                "status": loc.get("status"),
-                                                                "source": "google_compound",
-                                                            })
-                                        except Exception as exc:
-                                            logger.warning("Google auto-fetch failed for compound %s, user %s: %s", compound.get("base_name"), username, exc)
                                             append_alert(redis_client, username, {
                                                 "provider": "google",
                                                 "error": clean_error_message(str(exc)),
-                                                "type": "auto_fetch_error",
-                                                "target": compound.get("base_name"),
+                                                "type": "worker_error",
+                                                "target": "google_auto_fetch",
                                                 "timestamp_unix": int(now),
                                             })
-
-                                    if all_events:
-                                        from storage import append_history_events
-                                        append_history_events(redis_client, username, all_events)
-                                        logger.info("Stored %d Google location events for user %s", len(all_events), username)
-
-                                    redis_client.set(last_fetch_key, str(now))
-                                except Exception as exc:
-                                    logger.error("Google auto-fetch failed for user %s: %s", username, exc)
-                                    try:
-                                        append_alert(redis_client, username, {
-                                            "provider": "google",
-                                            "error": clean_error_message(str(exc)),
-                                            "type": "worker_error",
-                                            "target": "google_auto_fetch",
-                                            "timestamp_unix": int(now),
-                                        })
-                                    except Exception:
-                                        pass
+                                        except Exception:
+                                            pass
+                        finally:
+                            user_lock.release()
                     except Exception as exc:
                         logger.error("Google auto-refresh error for user %s: %s", username, exc)
                         try:
@@ -213,104 +232,7 @@ def _google_auto_refresh_loop(app: Flask):
         except Exception as exc:
             logger.error("Google auto-refresh loop error: %s", exc)
 
-        time.sleep(max(60, query_interval_min * 60 // 4))
-
-
-def _apple_auto_fetch_loop(app: Flask):
-    logger.info("Apple auto-fetch worker started")
-    while True:
-        query_interval_min = 600
-        try:
-            with app.app_context():
-                runtime = app.config["OPENTAG"]
-                redis_client = app.config["REDIS"]
-                users = runtime.get("users", {})
-                local_history = runtime.get("local_history", True)
-                query_interval_min = runtime.get("apple_auto_query_interval_min", 600)
-
-                if not local_history or query_interval_min <= 0:
-                    logger.debug("Apple auto-fetch disabled (local_history=%s, interval=%d)", local_history, query_interval_min)
-
-                for username in users.keys():
-                    try:
-                        now = time.time()
-                        accessories = read_user_accessories(username)
-                        if not accessories:
-                            continue
-
-                        last_fetch_key = "user:" + username + ":meta:last_apple_fetch"
-                        last_fetch = redis_client.get(last_fetch_key)
-                        last_fetch_ts = float(last_fetch) if last_fetch else 0
-                        if (now - last_fetch_ts) > (query_interval_min * 60):
-                            logger.info("Auto-fetching Apple locations for user %s", username)
-                            try:
-                                from fetch_apple import fetch_apple_locations
-                                from storage import append_history_events
-                                payload = fetch_apple_locations(runtime.get("haystack", {}), accessories, days=7, timeout=30)
-                                status_payload = {
-                                    "provider": "apple",
-                                    "ok": True,
-                                    "kind": "auto_fetch_location",
-                                    "timestamp_unix": int(now),
-                                    "details": payload,
-                                }
-                                set_fetch_status(redis_client, username, "apple", status_payload)
-
-                                details = payload.get("details") if isinstance(payload, dict) else None
-                                events = []
-                                if isinstance(details, dict):
-                                    reports = details.get("reports", [])
-                                    for report in reports:
-                                        if not isinstance(report, dict):
-                                            continue
-                                        ts_iso = report.get("timestamp", "")
-                                        ts_unix = 0
-                                        if isinstance(ts_iso, str) and ts_iso:
-                                            try:
-                                                ts_unix = int(time.mktime(time.strptime(ts_iso[:19], "%Y-%m-%dT%H:%M:%S")))
-                                            except Exception:
-                                                ts_unix = 0
-                                        events.append({
-                                            "provider": "apple",
-                                            "tag": (report.get("source") or {}).get("tag", "apple-tag"),
-                                            "source_file": (report.get("source") or {}).get("file", ""),
-                                            "latitude": report.get("latitude"),
-                                            "longitude": report.get("longitude"),
-                                            "timestamp_unix": ts_unix,
-                                            "status": "APPLE",
-                                            "source": "apple_haystack",
-                                        })
-
-                                if events:
-                                    append_history_events(redis_client, username, events)
-                                    logger.info("Stored %d Apple location events for user %s", len(events), username)
-
-                                redis_client.set(last_fetch_key, str(now))
-                            except Exception as exc:
-                                logger.error("Apple auto-fetch failed for user %s: %s", username, exc)
-                                append_alert(redis_client, username, {
-                                    "provider": "apple",
-                                    "error": clean_error_message(str(exc)),
-                                    "type": "auto_fetch_error",
-                                    "target": "apple_locations",
-                                    "timestamp_unix": int(now),
-                                })
-                    except Exception as exc:
-                        logger.error("Apple auto-fetch error for user %s: %s", username, exc)
-                        try:
-                            append_alert(redis_client, username, {
-                                "provider": "apple",
-                                "error": clean_error_message(str(exc)),
-                                "type": "worker_error",
-                                "target": "apple_auto_fetch",
-                                "timestamp_unix": int(now),
-                            })
-                        except Exception:
-                            pass
-        except Exception as exc:
-            logger.error("Apple auto-fetch loop error: %s", exc)
-
-        time.sleep(max(60, query_interval_min * 60 // 4))
+        time.sleep(15)
 
 
 def _history_cleanup_loop(app: Flask):
@@ -383,6 +305,7 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = False
 
     app.config["REDIS"] = create_redis_client(runtime)
+    app.config["APPLE_REQUEST_LIMITER"] = AppleRequestLimiter(app.config["REDIS"], runtime["haystack"])
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
@@ -414,7 +337,7 @@ def create_app() -> Flask:
     google_worker = threading.Thread(target=_google_auto_refresh_loop, args=(app,), daemon=True)
     google_worker.start()
 
-    apple_worker = threading.Thread(target=_apple_auto_fetch_loop, args=(app,), daemon=True)
+    apple_worker = threading.Thread(target=apple_auto_fetch_loop, args=(app,), daemon=True)
     apple_worker.start()
 
     cleanup_worker = threading.Thread(target=_history_cleanup_loop, args=(app,), daemon=True)

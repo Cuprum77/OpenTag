@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import struct
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -143,7 +143,7 @@ def _build_lookup_map(hashed_keys_map, source_map):
     return lookup
 
 
-def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=200, _alert_callback=None):
+def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=200, _alert_callback=None, _request_callback=None):
     endpoint = (haystack_cfg or {}).get("endpoint", "").strip()
     if not endpoint:
         raise ValueError("haystack endpoint is not configured")
@@ -173,7 +173,8 @@ def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, ba
             "ids": ids_batch,
             "days": query_days,
         }
-        response = requests.post(endpoint, json=payload, timeout=timeout, auth=auth)
+        request = _request_callback or requests.post
+        response = request(endpoint, json=payload, timeout=timeout, auth=auth)
         response.raise_for_status()
         body = response.json()
         batch_reports = body.get("results", []) if isinstance(body, dict) else []
@@ -193,6 +194,7 @@ def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, ba
 
         try:
             entry = _decrypt_report(report, lookup["private_key"])
+            entry["report_id"] = hashlib.sha256((lookup["canonical_id"] + ":" + report["payload"]).encode()).hexdigest()
             entry["key_id"] = key_id
             entry["canonical_key_id"] = lookup["canonical_id"]
             entry["source"] = lookup["source"]
@@ -227,3 +229,27 @@ def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, ba
         "reports": decoded,
         "failures": failed,
     }
+
+
+def apple_history_events(payload):
+    """Convert decoded Apple reports to history; Apple timestamps are UTC."""
+    events = []
+    for report in payload.get("reports", []):
+        if not isinstance(report, dict):
+            continue
+        try:
+            timestamp = datetime.fromisoformat(report.get("timestamp", "").replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            ts_unix = int(timestamp.timestamp())
+        except (ValueError, TypeError, AttributeError):
+            continue
+        source = report.get("source") or {}
+        events.append({
+            "provider": "apple", "tag": source.get("tag", "apple-tag"),
+            "source_file": source.get("file", ""),
+            "latitude": report.get("latitude"), "longitude": report.get("longitude"),
+            "timestamp_unix": ts_unix, "status": "APPLE", "source": "apple_haystack",
+            "report_id": report.get("report_id"),
+        })
+    return events

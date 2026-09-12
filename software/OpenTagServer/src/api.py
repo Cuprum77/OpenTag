@@ -1,3 +1,4 @@
+import json
 import time
 import logging
 import uuid
@@ -7,7 +8,7 @@ from threading import Thread
 from flask import Blueprint, current_app, g, jsonify, request, send_file
 
 from auth import login_required
-from fetch_apple import fetch_apple_locations
+from fetch_apple import apple_history_events, fetch_apple_locations
 from fetch_google import fetch_google_locations, list_google_targets, refresh_google_announcements
 from storage import (
     delete_user_file,
@@ -121,38 +122,8 @@ def _extract_google_events(payload):
 
 
 def _extract_apple_events(payload):
-    events = []
     details = payload.get("details") if isinstance(payload, dict) else None
-    if not isinstance(details, dict):
-        return events
-    reports = details.get("reports")
-    if not isinstance(reports, list):
-        reports = []
-
-    for report in reports:
-        if not isinstance(report, dict):
-            continue
-        ts_iso = report.get("timestamp", "")
-        ts_unix = 0
-        if isinstance(ts_iso, str) and ts_iso:
-            try:
-                ts_unix = int(time.mktime(time.strptime(ts_iso[:19], "%Y-%m-%dT%H:%M:%S")))
-            except Exception:
-                ts_unix = 0
-
-        events.append(
-            {
-                "provider": "apple",
-                "tag": (report.get("source") or {}).get("tag", "apple-tag"),
-                "source_file": (report.get("source") or {}).get("file", ""),
-                "latitude": report.get("latitude"),
-                "longitude": report.get("longitude"),
-                "timestamp_unix": ts_unix,
-                "status": "APPLE",
-                "source": "apple_haystack",
-            }
-        )
-    return events
+    return apple_history_events(details) if isinstance(details, dict) else []
 
 
 @api_bp.get("/keyfiles")
@@ -296,6 +267,7 @@ def fetch_status():
         {
             "google": get_fetch_status(redis_client, username, "google"),
             "apple": get_fetch_status(redis_client, username, "apple"),
+            "apple_singleton": get_fetch_status(redis_client, username, "apple_singleton"),
             "apple_merge": get_fetch_status(redis_client, username, "apple_merge"),
         }
     )
@@ -307,7 +279,7 @@ def status_errors():
     username = g.user["username"]
     redis_client = current_app.config["REDIS"]
     rows = []
-    for provider in ("apple", "google", "apple_merge"):
+    for provider in ("apple", "apple_singleton", "google", "apple_merge"):
         row = get_fetch_status(redis_client, username, provider)
         if isinstance(row, dict) and row.get("ok") is False:
             rows.append(row)
@@ -478,6 +450,18 @@ def apple_fetch():
         return jsonify({"error": "upload at least one accessories.json file first"}), 400
 
     body = request.get_json(silent=True) or {}
+    selected = body.get("accessory_ids")
+    if selected is not None:
+        if not isinstance(selected, list) or not all(isinstance(value, str) for value in selected):
+            return jsonify({"error": "accessory_ids must be an array of strings"}), 400
+        wanted = set(selected)
+        def matches_selection(row):
+            identity = str(row["id"]) if row.get("id") is not None else row.get("name", "")
+            selector = json.dumps([row.get("source_file", ""), identity], ensure_ascii=False, separators=(",", ":"))
+            return selector in wanted or identity in wanted
+        accessories = [row for row in accessories if matches_selection(row)]
+        if not accessories:
+            return jsonify({"error": "No selected Apple accessories found"}), 400
     days = int(body.get("days", 7))
     timeout = int(body.get("timeout", 30))
 
@@ -498,7 +482,14 @@ def apple_fetch():
 
     try:
         logger.info("Fetching Apple locations for user %s, days=%d", username, days)
-        payload = fetch_apple_locations(runtime.get("haystack", {}), accessories, days=days, timeout=timeout, _alert_callback=_apple_report_alert_callback)
+        with current_app.config["APPLE_REQUEST_LIMITER"].manual_fetch(
+                runtime.get("apple_manual_wait_timeout_seconds", 180)) as request_callback:
+            payload = fetch_apple_locations(
+                runtime.get("haystack", {}), accessories, days=days, timeout=timeout,
+                batch_size=runtime.get("apple_bulk_batch_size", 200),
+                _alert_callback=_apple_report_alert_callback,
+                _request_callback=request_callback,
+            )
         status_payload = {
             "provider": "apple",
             "ok": True,

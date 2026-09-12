@@ -572,11 +572,34 @@ def append_history_events(redis_client, username, events, max_items=5000):
     if not events:
         return
     key = f"user:{username}:history:events"
-    pipe = redis_client.pipeline()
-    for event in events:
-        pipe.lpush(key, json.dumps(event))
-    pipe.ltrim(key, 0, max_items - 1)
-    pipe.execute()
+    # Atomic deduplication against retained history also coordinates manual fetches
+    # with recovery sweeps. Distinct ciphertext reports at one timestamp are kept.
+    script = """
+    local seen = {}
+    for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+        local ok, row = pcall(cjson.decode, raw)
+        if ok and type(row) == 'table' and row.provider == 'apple'
+                and type(row.report_id) == 'string' and row.report_id ~= '' then
+            seen[row.report_id] = true
+        end
+    end
+    local added = 0
+    for i = 2, #ARGV do
+        local row = cjson.decode(ARGV[i])
+        local id = nil
+        if row.provider == 'apple' and type(row.report_id) == 'string' and row.report_id ~= '' then
+            id = row.report_id
+        end
+        if not id or not seen[id] then
+            redis.call('LPUSH', KEYS[1], ARGV[i])
+            if id then seen[id] = true end
+            added = added + 1
+        end
+    end
+    if added > 0 then redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[1]) - 1) end
+    return added
+    """
+    return redis_client.eval(script, 1, key, max_items, *[json.dumps(event) for event in events])
 
 
 def get_history_events(redis_client, username, limit=500):
@@ -632,40 +655,11 @@ def purge_history_events(redis_client, username, provider=None, source_file=None
 
 
 def purge_old_history_events(redis_client, username, max_age_seconds):
-    """Remove history events older than max_age_seconds. Returns count of removed events."""
+    """Atomically expire old entries without racing concurrent fetches."""
     if max_age_seconds <= 0:
         return 0
-
-    key = f"user:{username}:history:events"
-    raw_rows = redis_client.lrange(key, 0, -1)
-    if not raw_rows:
-        return 0
-
-    cutoff = time.time() - max_age_seconds
-    kept = []
-    removed = 0
-
-    for raw in raw_rows:
-        try:
-            row = json.loads(raw)
-        except Exception:
-            continue
-
-        ts = row.get("timestamp_unix", 0)
-        if ts and ts < cutoff:
-            removed += 1
-        else:
-            kept.append(raw)
-
-    if removed == 0:
-        return 0
-
-    pipe = redis_client.pipeline()
-    pipe.delete(key)
-    if kept:
-        pipe.rpush(key, *kept)
-    pipe.execute()
-    return removed
+    return _purge_old_list(redis_client, f"user:{username}:history:events",
+                           "timestamp_unix", time.time() - max_age_seconds)
 
 
 import re
@@ -743,40 +737,11 @@ def get_alerts(redis_client, username, limit=100):
 
 
 def purge_old_alerts(redis_client, username, max_age_seconds):
-    """Remove alerts older than max_age_seconds. Returns count of removed."""
+    """Atomically expire old entries without racing concurrent fetches."""
     if max_age_seconds <= 0:
         return 0
-
-    key = f"user:{username}:alerts"
-    raw_rows = redis_client.lrange(key, 0, -1)
-    if not raw_rows:
-        return 0
-
-    cutoff = time.time() - max_age_seconds
-    kept = []
-    removed = 0
-
-    for raw in raw_rows:
-        try:
-            row = json.loads(raw)
-        except Exception:
-            continue
-
-        ts = row.get("created_unix", 0)
-        if ts and ts < cutoff:
-            removed += 1
-        else:
-            kept.append(raw)
-
-    if removed == 0:
-        return 0
-
-    pipe = redis_client.pipeline()
-    pipe.delete(key)
-    if kept:
-        pipe.rpush(key, *kept)
-    pipe.execute()
-    return removed
+    return _purge_old_list(redis_client, f"user:{username}:alerts",
+                           "created_unix", time.time() - max_age_seconds)
 
 
 # ── Devices ──
@@ -862,3 +827,26 @@ def delete_device(redis_client, username, device_id):
         return False
     save_devices(redis_client, username, new_devices)
     return True
+
+
+def _purge_old_list(redis_client, key, timestamp_field, cutoff):
+    script = """
+    local kept = {}
+    local removed = 0
+    for _, raw in ipairs(redis.call('LRANGE', KEYS[1], 0, -1)) do
+        local ok, row = pcall(cjson.decode, raw)
+        local ts = nil
+        if ok and type(row) == 'table' then ts = tonumber(row[ARGV[1]]) end
+        if ts and ts > 0 and ts < tonumber(ARGV[2]) then
+            removed = removed + 1
+        else
+            table.insert(kept, raw)
+        end
+    end
+    if removed > 0 then
+        redis.call('DEL', KEYS[1])
+        for _, raw in ipairs(kept) do redis.call('RPUSH', KEYS[1], raw) end
+    end
+    return removed
+    """
+    return redis_client.eval(script, 1, key, timestamp_field, cutoff)

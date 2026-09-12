@@ -330,9 +330,10 @@ function renderAppleAccessoryOptions(accessories) {
   const rows = Array.isArray(accessories) ? accessories : [];
   for (const accessory of rows) {
     if (!accessory || typeof accessory !== 'object') continue;
-    const value = accessory.id != null ? String(accessory.id) : (accessory.name || '');
-    if (!value) continue;
-    const label = accessory.name || ('Tracker #' + value);
+    const identity = accessory.id != null ? String(accessory.id) : (accessory.name || '');
+    if (!identity) continue;
+    const value = JSON.stringify([accessory.source_file || '', identity]);
+    const label = accessory.name || ('Tracker #' + identity);
     const count = typeof accessory.key_count === 'number' ? accessory.key_count : 0;
     const source = accessory.source_file || 'unknown';
     const option = makeOption(value, label + ' (' + count + ' keys, ' + source + ')');
@@ -435,10 +436,19 @@ function getMultiSelectedValues(selectId) {
 }
 
 async function getJson(path) {
-  const res = await fetch(path, { credentials: 'same-origin' });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(path, { credentials: 'same-origin', signal: controller.signal });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Loading server data timed out.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function postFile(path, file) {
@@ -450,16 +460,26 @@ async function postFile(path, file) {
   return data;
 }
 
-async function postJson(path, payload) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify(payload || {})
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
+async function postJson(path, payload, timeoutMs = 420000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Fetch timed out. Check history before retrying; server work may still be finishing.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function refreshFiles() {
@@ -1070,7 +1090,8 @@ async function fetchAllSelected() {
 
   if (appleSelected.length > 0) {
     try {
-      await postJson('/api/apple/fetch', { days: 7 });
+      setOverviewGoogleFeedback('Fetching selected Apple items; waiting for the rate limit may take up to 3 minutes.');
+      await postJson('/api/apple/fetch', { days: 7, accessory_ids: appleSelected }, 240000);
       successCount += 1;
     } catch (err) {
       failures.push('Apple fetch: ' + String(err));
@@ -1079,6 +1100,7 @@ async function fetchAllSelected() {
 
   for (const compoundName of googleCompoundsSelected) {
     try {
+      setOverviewGoogleFeedback('Fetching Google compound: ' + compoundName);
       await postJson('/api/google/fetch', { compound_name: compoundName });
       successCount += 1;
     } catch (err) {
@@ -1088,6 +1110,7 @@ async function fetchAllSelected() {
 
   for (const canonicId of googleTrackersSelected) {
     try {
+      setOverviewGoogleFeedback('Fetching selected Google tracker.');
       await postJson('/api/google/fetch', { canonic_id: canonicId });
       successCount += 1;
     } catch (err) {

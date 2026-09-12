@@ -14,12 +14,19 @@ services:
     command: >-
       gunicorn --chdir ./src --bind 0.0.0.0:8080 --workers 2 --threads 4 --timeout 90 main:app
     depends_on:
-      - valkey
+      valkey:
+        condition: service_healthy
 
   valkey:
     container_name: opentag-server-db
     image: "valkey/valkey:latest"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
     # Not need to expose Redis port to the host machine
     # as the bot service can access it directly via Docker network
     # ports:

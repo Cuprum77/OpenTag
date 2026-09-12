@@ -219,3 +219,12 @@ data/*.toml
 # secrets
 data/secrets/*
 !data/secrets/.gitkeep
+
+# dotfiles
+.*
+
+# tests
+tests/*
+
+# local todo file
+todo.md
