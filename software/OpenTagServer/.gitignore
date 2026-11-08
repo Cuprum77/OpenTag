@@ -213,6 +213,10 @@ db/*
 # Configs
 data/*.toml
 
+# SQLite database (history, users, sessions)
+data/*.db
+data/*.db-*
+
 # keys for macless haystack
 *.json
 

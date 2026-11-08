@@ -1,10 +1,12 @@
+import logging
 import os
-import secrets
 import tomllib
 from pathlib import Path
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "data" / "config.toml"
+logger = logging.getLogger(__name__)
+
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 def _to_bool(value, default=False):
@@ -22,8 +24,27 @@ def _to_int(value, default=0):
         return default
 
 
+def _admin_from_doc(doc):
+    """The single admin account. `[admin]` is the current format; a lone
+    `[users.<name>]` entry with role = "admin" is accepted for older configs."""
+    admin = doc.get("admin")
+    if isinstance(admin, dict) and admin.get("username"):
+        return {"username": str(admin["username"]), "password_hash": str(admin.get("password_hash") or "")}
+
+    legacy = [
+        (name, entry) for name, entry in (doc.get("users") or {}).items()
+        if isinstance(entry, dict) and entry.get("role") == "admin"
+    ]
+    if len(legacy) == 1:
+        name, entry = legacy[0]
+        logger.warning("config: [users.%s] is deprecated, move the admin account to an [admin] section", name)
+        return {"username": name, "password_hash": str(entry.get("password_hash") or "")}
+    return None
+
+
 def load_runtime_config():
-    config_path = Path(os.environ.get("OPENTAG_CONFIG", str(DEFAULT_CONFIG_PATH)))
+    data_dir = Path(os.environ.get("OPENTAG_DATA_DIR", str(DEFAULT_DATA_DIR)))
+    config_path = Path(os.environ.get("OPENTAG_CONFIG", str(data_dir / "config.toml")))
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -31,12 +52,16 @@ def load_runtime_config():
         doc = tomllib.load(f)
 
     cfg = doc.get("config", {})
-    users = doc.get("users", {})
+    admin = _admin_from_doc(doc)
+    if not admin or not admin["password_hash"]:
+        raise ValueError("config: an [admin] section with username and password_hash is required")
 
     runtime = {
         "config_path": str(config_path),
-        "data_dir": str(Path(__file__).resolve().parents[1] / "data"),
-        "users": users,
+        "data_dir": str(data_dir),
+        "secrets_dir": str(data_dir / "secrets"),
+        "database_path": os.environ.get("OPENTAG_DB", str(data_dir / "opentag.db")),
+        "admin": admin,
         "haystack": {
             "endpoint": cfg.get("haystack_endpoint", ""),
             "login": cfg.get("haystack_login", ""),
@@ -46,7 +71,7 @@ def load_runtime_config():
         },
         "local_history": _to_bool(cfg.get("local_history", True), default=True),
         "google_auto_query_interval_min": _to_int(cfg.get("google_auto_query_interval_min", 60), default=60),
-        "apple_auto_query_interval_min": _to_int(cfg.get("apple_auto_query_interval_min", cfg.get("appple_auto_query_interval_min", 600)), default=600),
+        "apple_auto_query_interval_min": _to_int(cfg.get("apple_auto_query_interval_min", 600), default=600),
         "apple_manual_wait_timeout_seconds": max(1, min(180, _to_int(cfg.get("apple_manual_wait_timeout_seconds", 180), 180))),
         "google_refresh_settle_seconds": max(0, _to_int(cfg.get("google_refresh_settle_seconds", 15), 15)),
         "apple_singleton_sweep_enabled": _to_bool(cfg.get("apple_singleton_sweep_enabled", True), True),
@@ -55,17 +80,8 @@ def load_runtime_config():
         "apple_bulk_batch_size": max(1, _to_int(cfg.get("apple_bulk_batch_size", 200), 200)),
         "apple_query_days": max(1, _to_int(cfg.get("apple_query_days", 7), 7)),
         "google_key_refresh_interval_hours": _to_int(cfg.get("google_key_refresh_interval_hours", 24), default=24),
-        "history_retention_days": _to_int(cfg.get("history_retention_days", 30), default=30),
+        # Global maximum; devices may choose a shorter retention in the UI. 0 = unlimited.
+        "history_retention_days": max(0, _to_int(cfg.get("history_retention_days", 30), default=30)),
         "log_level": os.environ.get("OPENTAG_LOG_LEVEL", cfg.get("log_level", "INFO")).upper(),
-        "secret_key": os.environ.get("OPENTAG_SECRET_KEY", secrets.token_urlsafe(48)),
     }
-
-    redis_url = os.environ.get("REDIS_URL")
-    runtime["redis"] = {
-        "url": redis_url,
-        "host": os.environ.get("REDIS_HOST", "db"),
-        "port": _to_int(os.environ.get("REDIS_PORT", "6379"), default=6379),
-        "db": _to_int(os.environ.get("REDIS_DB", "0"), default=0),
-    }
-
     return runtime

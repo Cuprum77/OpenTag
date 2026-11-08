@@ -12,29 +12,10 @@ services:
       - ./src:/usr/bot/src
       - ./data:/usr/bot/data
     command: >-
-      gunicorn --chdir ./src --bind 0.0.0.0:8080 --workers 2 --threads 4 --timeout 90 main:app
-    depends_on:
-      valkey:
-        condition: service_healthy
-
-  valkey:
-    container_name: opentag-server-db
-    image: "valkey/valkey:latest"
-    restart: unless-stopped
+      gunicorn --chdir ./src --bind 0.0.0.0:8080 --workers 1 --threads 8 --timeout 600 main:app
     healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
-      start_period: 5s
-    # Not need to expose Redis port to the host machine
-    # as the bot service can access it directly via Docker network
-    # ports:
-    #   - 6379:6379
-    volumes:
-      - ./db/valkey:/data
-    networks:
-      default:
-        aliases:
-          - db
-    entrypoint: valkey-server --appendonly yes --bind 0.0.0.0 --protected-mode no
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

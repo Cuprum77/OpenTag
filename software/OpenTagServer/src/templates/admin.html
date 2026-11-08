@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenTag Users</title>
+  <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>OpenTag Server · Users</h1>
+    </div>
+    <div class="topbar-right">
+      <div class="topbar-divider"></div>
+      <div class="user">Admin <strong>{{ username }}</strong></div>
+      <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>
+      <form method="post" action="/auth/logout" class="signout-form">
+        <button type="submit" class="signout-btn">Sign Out</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="layout simple-page">
+    <section class="card">
+      <h2>Create user</h2>
+      <p class="hint">Each user has their own keys, devices and history. The admin account can manage accounts but cannot see any of that.</p>
+      <form id="create-user-form" class="stack-form" autocomplete="off">
+        <label for="new-username">Username</label>
+        <input id="new-username" required pattern="[A-Za-z0-9_\-]{1,64}" title="Letters, digits, _ and -">
+        <label for="new-password">Password (min. 8 characters)</label>
+        <input id="new-password" type="password" minlength="8" required autocomplete="new-password">
+        <button type="submit">Create user</button>
+      </form>
+      <p id="admin-feedback" class="hint"></p>
+    </section>
+
+    <section class="card">
+      <h2>Users</h2>
+      <div id="users-list" class="file-list"><p class="hint">Loading…</p></div>
+      <p class="hint">The admin password is set in <code>config.toml</code>.</p>
+    </section>
+  </main>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

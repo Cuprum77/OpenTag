@@ -1,0 +1,54 @@
+/* Font Awesome Free 5.15.4 by @fontawesome - https://fontawesome.com
+ * License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License)
+ * Trimmed to the solid webfont and the icons OpenTag uses; see LICENSE.txt.
+ * To add an icon, copy its `.fa-<name>:before` rule from the full Font Awesome 5.15.4 css/all.css. */
+@font-face {
+  font-family: "Font Awesome 5 Free";
+  font-style: normal;
+  font-weight: 900;
+  font-display: block;
+  src: url(fa-solid-900.woff2) format("woff2");
+}
+
+.fas {
+  font-family: "Font Awesome 5 Free";
+  font-weight: 900;
+  font-style: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  line-height: 1;
+  display: inline-block;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+}
+
+.fa-tag:before { content:"\f02b"; }
+.fa-user-circle:before { content:"\f2bd"; }
+.fa-cube:before { content:"\f1b2"; }
+.fa-key:before { content:"\f084"; }
+.fa-suitcase-rolling:before { content:"\f5c1"; }
+.fa-suitcase:before { content:"\f0f2"; }
+.fa-briefcase:before { content:"\f0b1"; }
+.fa-shopping-bag:before { content:"\f290"; }
+.fa-wallet:before { content:"\f555"; }
+.fa-car:before { content:"\f1b9"; }
+.fa-motorcycle:before { content:"\f21c"; }
+.fa-bicycle:before { content:"\f206"; }
+.fa-truck:before { content:"\f0d1"; }
+.fa-plane:before { content:"\f072"; }
+.fa-paw:before { content:"\f1b0"; }
+.fa-dog:before { content:"\f6d3"; }
+.fa-cat:before { content:"\f6be"; }
+.fa-baby-carriage:before { content:"\f77d"; }
+.fa-graduation-cap:before { content:"\f19d"; }
+.fa-home:before { content:"\f015"; }
+.fa-laptop:before { content:"\f109"; }
+.fa-mobile-alt:before { content:"\f3cd"; }
+.fa-headphones:before { content:"\f025"; }
+.fa-camera:before { content:"\f030"; }
+.fa-umbrella:before { content:"\f0e9"; }
+.fa-gamepad:before { content:"\f11b"; }
+.fa-music:before { content:"\f001"; }
+.fa-gift:before { content:"\f06b"; }
+.fa-box:before { content:"\f466"; }
+.fa-glasses:before { content:"\f530"; }

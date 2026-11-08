@@ -93,6 +93,7 @@ def _build_key_map(accessories_rows):
             hashed_keys_map[hashed] = key
             source_map[hashed] = {
                 "tag": tag_name,
+                "tag_id": item.get("tag_id"),
                 "file": item.get("source_file", ""),
             }
 
@@ -247,8 +248,9 @@ def apple_history_events(payload):
         source = report.get("source") or {}
         events.append({
             "provider": "apple", "tag": source.get("tag", "apple-tag"),
-            "source_file": source.get("file", ""),
+            "tag_id": source.get("tag_id"), "source_file": source.get("file", ""),
             "latitude": report.get("latitude"), "longitude": report.get("longitude"),
+            "accuracy": report.get("accuracy"),
             "timestamp_unix": ts_unix, "status": "APPLE", "source": "apple_haystack",
             "report_id": report.get("report_id"),
         })

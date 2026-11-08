@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>OpenTag Server Dashboard</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="/static/fontawesome/fontawesome.css">
   <link rel="stylesheet" href="/static/dashboard.css">
 </head>
 <body>
@@ -19,7 +20,7 @@
     </div>
     <div class="topbar-right">
       <div class="topbar-divider"></div>
-      <div class="user">Signed in as <strong id="username">{{ username }}</strong></div>
+      <a href="/account" class="user-link" title="Account settings"><i class="fas fa-user-circle" aria-hidden="true"></i><strong id="username">{{ username }}</strong></a>
       <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>
       <form method="post" action="/auth/logout" class="signout-form">
         <button type="submit" class="signout-btn">Sign Out</button>
@@ -37,9 +38,9 @@
 
         <div class="sidebar">
           <div class="card">
-            <h2>Tags</h2>
+            <h2>Devices</h2>
             <div id="tags-container" class="tags-container">
-              <p class="hint">Tags will appear here after the first refresh.</p>
+              <p class="hint">Devices will appear here after the first refresh.</p>
             </div>
           </div>
 
@@ -68,28 +69,12 @@
             <h2>Actions</h2>
             <p id="google-targets-feedback" class="hint"></p>
             <form id="google-fetch-form" onsubmit="return false;">
-              <label for="apple-accessory-select">Apple accessories</label>
-              <select id="apple-accessory-select" multiple size="4">
-                <option value="">Select an Apple accessory</option>
-              </select>
-
-              <label for="google-compound-name">Google compound trackers</label>
-              <select id="google-compound-name" multiple size="5">
-                <option value="">Select a compound tracker</option>
-              </select>
-
-              <label for="google-canonic-id">Google non-compound trackers</label>
-              <select id="google-canonic-id" multiple size="6">
-                <option value="">Select a tracker</option>
-              </select>
-
-              <label class="debug-toggle" style="margin: 6px 0 10px;">
-                <input type="checkbox" id="google-expand-compounds">
-                <span>Include compound pieces in the non-compound list</span>
-              </label>
-
+              <label for="apple-accessory-select">Apple tags</label>
+              <select id="apple-accessory-select" multiple size="4"></select>
+              <label for="google-tag-select">Google tags</label>
+              <select id="google-tag-select" multiple size="5"></select>
               <button type="button" id="fetch-selected-btn">Fetch All Selected</button>
-              <button type="button" id="refresh-keys-selected-btn">Refresh Google Keys For Selected</button>
+              <button type="button" id="refresh-keys-selected-btn">Sync with Google</button>
             </form>
           </div>
 
@@ -103,7 +88,7 @@
           <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <h2 style="margin: 0;">Alerts</h2>
-              <button type="button" id="clear-alerts-btn" title="Clear all alerts" style="font-size: 12px; padding: 4px 10px;">Clear</button>
+              <button type="button" id="clear-alerts-btn" title="Dismiss all alerts" style="font-size: 12px; padding: 4px 10px;">Dismiss all</button>
             </div>
             <div id="errors-container" class="errors-container">
               <p class="hint">No errors</p>
@@ -141,7 +126,7 @@
               <input type="file" id="secrets-file" accept="application/json,.json" required>
               <button type="submit" id="upload-secrets-btn">Upload</button>
             </form>
-            <button type="button" id="refresh-google-keys-btn" class="keys-secondary-btn">Refresh Keys from Google</button>
+            <button type="button" id="refresh-google-keys-btn" class="keys-secondary-btn" title="Lists your trackers on Google, removes ones Google no longer has, and announces upcoming keys so Google can locate them.">Sync with Google &amp; announce keys</button>
           </div>
           <p id="google-upload-hint" class="hint"></p>
           <p id="google-feedback" class="hint"></p>
@@ -158,8 +143,8 @@
     <section class="tab-content" id="tab-devices">
       <div class="devices-layout">
         <div class="card devices-panel">
-          <h2>Available Tags</h2>
-          <p class="hint">Select tags to combine into a device</p>
+          <h2>Tags</h2>
+          <p class="hint">Tick the tags that belong to one physical thing (for example the Apple and Google halves of a tag) and create a device from them. Tags that are not part of a device are tracked on their own.</p>
           <div id="devices-tag-list" class="devices-tag-list"></div>
           <button type="button" id="build-device-btn" class="device-action-btn">+ Create Device</button>
         </div>
@@ -167,7 +152,7 @@
         <div class="card devices-panel">
           <h2>Devices</h2>
           <div id="devices-container" class="devices-container">
-            <p class="hint">No devices yet. Select tags and click "+ Create Device".</p>
+            <p class="hint">No devices yet.</p>
           </div>
         </div>
       </div>
@@ -179,7 +164,7 @@
   <div id="build-device-modal" class="modal-overlay" style="display:none">
     <div class="modal-dialog">
       <div class="modal-header">
-        <h2>Create Device</h2>
+        <h2 id="device-modal-title">Create Device</h2>
         <button type="button" id="modal-close-btn" class="modal-close-btn">&times;</button>
       </div>
       <div class="modal-body">
@@ -202,6 +187,10 @@
           </div>
         </div>
         <div class="modal-section">
+          <label>Icon</label>
+          <div id="device-icon-picker" class="icon-picker"></div>
+        </div>
+        <div class="modal-section">
           <label id="device-tags-label">Selected tags: 0</label>
           <div id="device-tag-checklist" class="tag-checklist"></div>
         </div>
@@ -209,6 +198,21 @@
       <div class="modal-footer">
         <button type="button" id="modal-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
         <button type="button" id="modal-create-btn" class="modal-btn modal-btn-create" disabled>Create Device</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIRM MODAL -->
+  <div id="confirm-modal" class="modal-overlay" style="display:none">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 id="confirm-modal-title">Are you sure?</h2>
+        <button type="button" id="confirm-close-btn" class="modal-close-btn">&times;</button>
+      </div>
+      <div id="confirm-modal-body" class="modal-body"></div>
+      <div class="modal-footer">
+        <button type="button" id="confirm-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
+        <button type="button" id="confirm-ok-btn" class="modal-btn modal-btn-danger">Delete</button>
       </div>
     </div>
   </div>

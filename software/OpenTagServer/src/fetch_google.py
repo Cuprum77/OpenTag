@@ -4,12 +4,23 @@ import time
 import os
 import subprocess
 import sys
+import threading
+from collections import defaultdict
 from pathlib import Path
 
 
 DEFAULT_SCRIPT_PATH = Path(__file__).resolve().parent / "ext" / "portable_fetch_update.py"
 SCRIPT_PATH = Path(os.environ.get("OPENTAG_GOOGLE_FETCH_SCRIPT", str(DEFAULT_SCRIPT_PATH)))
 PYTHON_BIN = os.environ.get("OPENTAG_GOOGLE_FETCH_PYTHON", sys.executable)
+
+# The bridge script rewrites secrets.json; never run two invocations for one user at once.
+_user_locks = defaultdict(threading.Lock)
+_user_locks_guard = threading.Lock()
+
+
+def user_lock(username):
+    with _user_locks_guard:
+        return _user_locks[username]
 
 
 def _run_google_script(args, timeout=120):

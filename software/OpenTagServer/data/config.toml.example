@@ -7,7 +7,7 @@ local_history = "True"                              # Whether to store a local h
 google_auto_query_interval_min = 60                 # The interval in minutes between automatic queries to Google to update the history. Set to 0 to disable, automatically disabled if local_history is False.
 apple_auto_query_interval_min = 600                 # Same as above but for Apple, (Apple stores 7 days of history so can be much less frequent). Set to 0 to disable, automatically disabled if local_history is False.
 google_key_refresh_interval_hours = 24              # How often (in hours) to re-upload Google announcement keys. Set to 0 to disable.
-history_retention_days = 30                         # The number of days to keep the history in the local database, set to 0 to keep forever, automatically disabled if local_history is False.
+history_retention_days = 30                         # Maximum days of history kept. Devices can choose less in the UI. 0 = no maximum.
 log_level = "INFO"                                  # Logging level for Docker console: DEBUG, INFO, WARNING, ERROR
 
 
@@ -24,13 +24,8 @@ apple_query_days = 7                        # Lookback for automatic bulk and si
 # Set local_history=false to disable both automatic modes. Bulk interval 0 disables
 # only bulk polling; apple_singleton_sweep_enabled=false disables only the sweep.
 
-# User config
-[users.admin]                           # users.admin -> username: admin
-password_hash = "$6$.mDwv..."           # Password generated with `openssl passwd -6`
-role = "admin"                          # User role, can be "admin" or "user", admins can do admin things, users can only query the locations and view their own history
-
-[users.user1]                           # users.user1 -> username: user1
-password_hash = "$6$.mDwv..."           # Password generated with `openssl passwd -6`           
-role = "user"                           # User can query their own history and view their own locations
-
-# More users can be added using the same pattern
+# Admin account. The admin only manages user accounts (in the web UI) and cannot see
+# any keys, devices or locations. Generate the hash with: openssl passwd -6
+[admin]
+username = "admin"
+password_hash = "$6$.mDwv..."

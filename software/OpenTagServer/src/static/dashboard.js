@@ -1,46 +1,198 @@
 // ── Theme / Dark Mode ──
 function initDarkMode() {
   const toggle = document.getElementById('theme-toggle');
-  const loginToggle = document.getElementById('login-theme-toggle');
-  const isDark = localStorage.getItem('opentag_dark') === 'true';
-
-  if (isDark) {
-    document.body.classList.add('dark');
-  }
+  let isDark = false;
+  try { isDark = localStorage.getItem('opentag_dark') === 'true'; } catch (e) { /* storage blocked */ }
+  if (isDark) document.body.classList.add('dark');
 
   function updateIcon(dark) {
-    const btn = toggle || loginToggle;
-    if (btn) btn.textContent = dark ? '☀️' : '🌙';
+    if (toggle) toggle.textContent = dark ? '☀️' : '🌙';
   }
   updateIcon(isDark);
 
-  function toggleTheme() {
-    const nowDark = !document.body.classList.contains('dark');
-    document.body.classList.toggle('dark', nowDark);
-    localStorage.setItem('opentag_dark', nowDark);
-    updateIcon(nowDark);
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const nowDark = !document.body.classList.contains('dark');
+      document.body.classList.toggle('dark', nowDark);
+      try { localStorage.setItem('opentag_dark', nowDark); } catch (e) { /* storage blocked */ }
+      updateIcon(nowDark);
+    });
   }
-
-  if (toggle) toggle.addEventListener('click', toggleTheme);
-  if (loginToggle) loginToggle.addEventListener('click', toggleTheme);
 }
 
-// Initialize dark mode immediately (before DOMContentLoaded so it applies before paint)
+// Apply the theme before first paint.
 initDarkMode();
 
-// ── Tab switching ──
+// ── State ──
 let map = null;
 let markerLayer = null;
 let polylineLayer = null;
-let lastGoogleTargets = [];
-let lastGoogleCompounds = [];
-let selectedDeviceTags = new Set(); // Track selected tags for device creation
+let inventory = { devices: [], errors: [], warnings: [], max_retention_days: null };
+const selectedDeviceTags = new Set(); // tag ids picked in the Devices tab
+let editingDevice = null; // device being edited in the device modal (null = creating)
 
+const AUTO_DEVICE_ICON = 'tag';
+const DEFAULT_DEVICE_ICON = 'cube';
+// Font Awesome 5 solid icons offered for devices (each needs a rule in static/fontawesome/fontawesome.css).
+const DEVICE_ICONS = [
+  'cube', 'key', 'suitcase-rolling', 'suitcase', 'briefcase', 'shopping-bag', 'wallet', 'glasses',
+  'car', 'motorcycle', 'bicycle', 'truck', 'plane', 'paw', 'dog', 'cat', 'baby-carriage',
+  'graduation-cap', 'home', 'laptop', 'mobile-alt', 'headphones', 'camera', 'umbrella',
+  'gamepad', 'music', 'gift', 'box'
+];
+
+function faIcon(name, className, props) {
+  return el('i', Object.assign({ className: 'fas fa-' + name + (className ? ' ' + className : ''), 'aria-hidden': 'true' }, props || {}));
+}
+
+function customDevices() {
+  return (inventory.devices || []).filter(d => !d.auto_created);
+}
+
+function deviceIcon(device) {
+  const auto = device.auto_created;
+  const icon = auto ? AUTO_DEVICE_ICON : (DEVICE_ICONS.includes(device.icon) ? device.icon : DEFAULT_DEVICE_ICON);
+  return faIcon(icon, 'device-icon' + (auto ? ' auto' : ''), {
+    style: 'color:' + device.color,
+    title: auto ? 'Single tag (not part of a custom device)' : 'Custom device'
+  });
+}
+
+function allTags() {
+  const tags = [];
+  for (const device of inventory.devices || []) {
+    for (const tag of device.tags || []) tags.push(Object.assign({ device }, tag));
+  }
+  return tags;
+}
+
+// ── DOM helpers ──
+function el(tag, props, children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === undefined || value === null) continue;
+    if (key === 'className') node.className = value;
+    else if (key === 'text') node.textContent = value;
+    else if (key === 'style') node.style.cssText = value;
+    else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
+    else if (key === 'dataset') Object.assign(node.dataset, value);
+    else node.setAttribute(key, value);
+  }
+  for (const child of [].concat(children || [])) {
+    if (child === null || child === undefined || child === false) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+function replaceChildren(host, children) {
+  if (!host) return;
+  host.textContent = '';
+  for (const child of [].concat(children || [])) {
+    if (child === null || child === undefined || child === false) continue;
+    host.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+}
+
+function hint(text, isError) {
+  return el('p', { className: 'hint', text, style: isError ? 'color: var(--text-error)' : null });
+}
+
+function plural(n, word) {
+  return n + ' ' + word + (n === 1 ? '' : 's');
+}
+
+function formatTime(unix) {
+  return unix ? new Date(unix * 1000).toLocaleString() : 'never';
+}
+
+function setFeedback(id, message, isError = false) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  node.textContent = message || '';
+  node.classList.remove('feedback-success', 'feedback-error');
+  if (message) node.classList.add(isError ? 'feedback-error' : 'feedback-success');
+}
+
+// ── Loading throbber ──
+function withLoading(button, asyncFn) {
+  return async () => {
+    if (button.classList.contains('loading')) return;
+    button.classList.add('loading');
+    button.disabled = true;
+    const originalText = button.textContent;
+    replaceChildren(button, [el('span', { className: 'spinner' }), originalText]);
+    try {
+      await asyncFn();
+    } finally {
+      button.classList.remove('loading');
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  };
+}
+
+// ── HTTP ──
+async function readJson(res) {
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* non-JSON error page */ }
+  if (res.status === 401) {
+    window.location.href = '/auth/login';
+    throw new Error('Session expired');
+  }
+  if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+  return data;
+}
+
+async function getJson(path) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(path, { credentials: 'same-origin', signal: controller.signal });
+    return await readJson(res);
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Loading server data timed out.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sendJson(method, path, payload, timeoutMs = 420000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      signal: controller.signal
+    });
+    return await readJson(res);
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out. Check history before retrying; server work may still be finishing.');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const postJson = (path, payload, timeoutMs) => sendJson('POST', path, payload || {}, timeoutMs);
+
+async function postFile(path, file) {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch(path, { method: 'POST', body, credentials: 'same-origin' });
+  return readJson(res);
+}
+
+// ── Map ──
 function initMap() {
   const mapHost = document.getElementById('map');
   if (!mapHost) return;
   if (!window.L) {
-    mapHost.innerHTML = '<p class="hint" style="padding:12px">Map unavailable. Leaflet failed to load.</p>';
+    replaceChildren(mapHost, hint('Map unavailable. Leaflet failed to load.', true));
     return;
   }
   map = L.map('map').setView([37.7749, -122.4194], 3);
@@ -52,1115 +204,651 @@ function initMap() {
   polylineLayer = L.layerGroup().addTo(map);
 }
 
-function setAppleFeedback(message, isError = false) {
-  const el = document.getElementById('apple-feedback');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('feedback-success', 'feedback-error');
-  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
-}
-
-function setGoogleFeedback(message, isError = false) {
-  const el = document.getElementById('google-feedback');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('feedback-success', 'feedback-error');
-  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
-}
-
-function setOverviewGoogleFeedback(message, isError = false) {
-  const el = document.getElementById('google-targets-feedback');
-  if (!el) return;
-  el.textContent = message || '';
-  el.classList.remove('feedback-success', 'feedback-error');
-  el.classList.add(isError ? 'feedback-error' : 'feedback-success');
-}
-
-// ── Loading throbber ──
-function withLoading(button, asyncFn) {
-  return async () => {
-    if (button.classList.contains('loading')) return;
-    button.classList.add('loading');
-    button.disabled = true;
-    const originalText = button.textContent;
-    button.innerHTML = '<span class="spinner"></span>' + originalText;
-    try {
-      await asyncFn();
-    } finally {
-      button.classList.remove('loading');
-      button.disabled = false;
-      button.textContent = originalText;
-    }
-  };
-}
-
-// ── Apple accessories list ──
-function renderAppleAccessoriesList(accessories) {
-  const host = document.getElementById('apple-accessories-list');
-  if (!host) return;
-  host.innerHTML = '';
-
-  const rows = Array.isArray(accessories) ? accessories : [];
-  if (rows.length === 0) {
-    host.innerHTML = '<p class="hint">No accessories uploaded yet.</p>';
+// ── Inventory (devices + tags) ──
+async function refreshInventory() {
+  try {
+    inventory = await getJson('/api/inventory');
+  } catch (err) {
+    replaceChildren(document.getElementById('tags-container'), hint(String(err), true));
     return;
   }
-
-  for (const acc of rows) {
-    const row = document.createElement('div');
-    row.className = 'key-row apple';
-    const header = document.createElement('div');
-    header.className = 'key-row-header';
-    const info = document.createElement('div');
-    info.className = 'key-row-info';
-    const name = acc.name || ('Tracker #' + (acc.id || ''));
-    const count = typeof acc.key_count === 'number' ? acc.key_count : 0;
-    const nameEl = document.createElement('span');
-    nameEl.className = 'key-name';
-    nameEl.textContent = name;
-    const metaEl = document.createElement('span');
-    metaEl.className = 'key-meta';
-    metaEl.textContent = count + ' key' + (count !== 1 ? 's' : '');
-    info.appendChild(nameEl);
-    info.appendChild(metaEl);
-    header.appendChild(info);
-    row.appendChild(header);
-    host.appendChild(row);
-  }
+  renderOverviewDevices();
+  renderFetchSelects();
+  renderAppleTagList();
+  renderGoogleTagList();
+  renderDevicesTagList();
+  renderDevices();
+  const problems = (inventory.errors || []).map(e => e.file + ': ' + e.error).concat(inventory.warnings || []);
+  setFeedback('apple-feedback', problems.join(' | '), problems.length > 0);
 }
 
-// ── Google targets list ──
-function renderGoogleTargetsList(targets, compounds) {
-  const host = document.getElementById('google-targets-list');
-  if (!host) return;
-  host.innerHTML = '';
+function tagChip(tag) {
+  return el('span', { className: 'device-tag-chip ' + tag.provider, text: tag.name + (tag.missing ? ' (missing keys)' : '') });
+}
 
-  const targetRows = Array.isArray(targets) ? targets : [];
-  const compoundRows = Array.isArray(compounds) ? compounds : [];
-
-  if (targetRows.length === 0 && compoundRows.length === 0) {
-    host.innerHTML = '<p class="hint">No Google targets found. Upload secrets.json and refresh keys.</p>';
+function renderOverviewDevices() {
+  const host = document.getElementById('tags-container');
+  const devices = inventory.devices || [];
+  if (devices.length === 0) {
+    replaceChildren(host, hint('No devices yet. Upload key files in the Keys tab.'));
     return;
   }
-
-  if (compoundRows.length > 0) {
-    for (const compound of compoundRows) {
-      const row = document.createElement('div');
-      row.className = 'key-row google';
-      const label = compound.base_name || compound.compound_id;
-      const subtags = compound.subtags || [];
-      const subtagCount = subtags.length;
-      const keyCount = typeof compound.requested_key_count === 'number' ? compound.requested_key_count : 0;
-
-      const header = document.createElement('div');
-      header.className = 'key-row-header';
-
-      const info = document.createElement('div');
-      info.className = 'key-row-info';
-      const nameEl = document.createElement('span');
-      nameEl.className = 'key-name';
-      nameEl.textContent = label;
-      const metaEl = document.createElement('span');
-      metaEl.className = 'key-meta';
-      metaEl.textContent = 'compound | ' + keyCount + ' keys | ' + subtagCount + ' subtag' + (subtagCount !== 1 ? 's' : '');
-      info.appendChild(nameEl);
-      info.appendChild(metaEl);
-      header.appendChild(info);
-
-      if (subtagCount > 0) {
-        const expandBtn = document.createElement('button');
-        expandBtn.type = 'button';
-        expandBtn.className = 'key-row-expand-btn';
-        expandBtn.textContent = '▼';
-        const details = document.createElement('div');
-        details.className = 'key-row-details';
-        for (const subtag of subtags) {
-          const subtagEl = document.createElement('div');
-          subtagEl.className = 'key-subtag';
-          const nameSpan = document.createElement('span');
-          nameSpan.className = 'key-subtag-name';
-          nameSpan.textContent = subtag.name || 'unnamed';
-          const countSpan = document.createElement('span');
-          countSpan.className = 'key-subtag-count';
-          countSpan.textContent = (subtag.key_count || 0) + ' keys';
-          subtagEl.appendChild(nameSpan);
-          subtagEl.appendChild(countSpan);
-          details.appendChild(subtagEl);
-        }
-        expandBtn.addEventListener('click', () => {
-          const isOpen = details.classList.toggle('open');
-          expandBtn.textContent = isOpen ? '▲' : '▼';
-        });
-        header.appendChild(expandBtn);
-        row.appendChild(header);
-        row.appendChild(details);
-      } else {
-        row.appendChild(header);
-      }
-      host.appendChild(row);
-    }
-  }
-
-  if (targetRows.length > 0) {
-    for (const target of targetRows) {
-      const row = document.createElement('div');
-      row.className = 'key-row google';
-      const header = document.createElement('div');
-      header.className = 'key-row-header';
-      const info = document.createElement('div');
-      info.className = 'key-row-info';
-      const label = deriveGoogleTargetLabel(target);
-      const value = deriveGoogleTargetValue(target);
-      const nameEl = document.createElement('span');
-      nameEl.className = 'key-name';
-      nameEl.textContent = label;
-      const metaEl = document.createElement('span');
-      metaEl.className = 'key-meta';
-      metaEl.textContent = value !== label ? value : 'target';
-      info.appendChild(nameEl);
-      info.appendChild(metaEl);
-      header.appendChild(info);
-      row.appendChild(header);
-      host.appendChild(row);
-    }
-  }
+  replaceChildren(host, devices.map(device => {
+    const seen = Math.max(0, ...device.tags.map(t => t.last_seen_unix || 0));
+    return el('div', { className: 'tag-card', style: 'border-left: 4px solid ' + device.color }, [
+      el('div', { className: 'tag-card-header' }, [deviceIcon(device), el('span', { className: 'tag-name', text: device.name })]),
+      el('div', { className: 'device-tags' }, device.tags.map(tagChip)),
+      el('div', { className: 'tag-meta', text: 'Last seen: ' + formatTime(seen) })
+    ]);
+  }));
 }
 
-// ── File management (per section) ──
-function renderAppleFiles(files) {
-  const host = document.getElementById('apple-files-list');
-  if (!host) return;
-  host.innerHTML = '';
-
-  const rows = (Array.isArray(files) ? files : []).filter(f => f && f.category === 'accessories');
-  if (rows.length === 0) return;
-
-  for (const file of rows) {
-    const row = document.createElement('div');
-    row.className = 'file-row';
-    const info = document.createElement('div');
-    info.className = 'file-info';
-    const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
-
-    const nameLink = document.createElement('a');
-    nameLink.className = 'file-name-link';
-    nameLink.href = '/api/keyfiles/' + encodeURIComponent(file.filename) + '/download';
-    nameLink.textContent = file.filename;
-    nameLink.title = 'Click to download';
-
-    const meta = document.createElement('span');
-    meta.textContent = file.size + ' bytes | ' + updated;
-
-    info.appendChild(nameLink);
-    info.appendChild(meta);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'delete-btn';
-    btn.dataset.filename = file.filename;
-    btn.textContent = 'Delete';
-    row.appendChild(info);
-    row.appendChild(btn);
-    host.appendChild(row);
-  }
-}
-
-function renderGoogleFiles(files) {
-  const host = document.getElementById('google-files-list');
-  if (!host) return;
-  host.innerHTML = '';
-
-  const secretsInput = document.getElementById('secrets-file');
-  const secretsBtn = document.getElementById('upload-secrets-btn');
-  const googleHint = document.getElementById('google-upload-hint');
-
-  const rows = (Array.isArray(files) ? files : []).filter(f => f && f.category === 'secrets');
-  const hasSecrets = rows.length > 0;
-  if (secretsInput) secretsInput.disabled = hasSecrets;
-  if (secretsBtn) secretsBtn.disabled = hasSecrets;
-  if (googleHint) {
-    googleHint.textContent = hasSecrets
-      ? 'Google auth file already exists. Delete secrets.json to upload a replacement.'
-      : '';
-  }
-
-  if (rows.length === 0) {
-    host.innerHTML = '<p class="hint">No secrets.json uploaded.</p>';
-    return;
-  }
-
-  for (const file of rows) {
-    const row = document.createElement('div');
-    row.className = 'file-row';
-    const info = document.createElement('div');
-    info.className = 'file-info';
-    const updated = file.updated_unix ? new Date(file.updated_unix * 1000).toLocaleString() : 'n/a';
-
-    const nameLink = document.createElement('a');
-    nameLink.className = 'file-name-link';
-    nameLink.href = '/api/keyfiles/' + encodeURIComponent(file.filename) + '/download';
-    nameLink.textContent = file.filename;
-    nameLink.title = 'Click to download';
-
-    const meta = document.createElement('span');
-    meta.textContent = file.size + ' bytes | ' + updated;
-
-    info.appendChild(nameLink);
-    info.appendChild(meta);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'delete-btn';
-    btn.dataset.filename = file.filename;
-    btn.textContent = 'Delete';
-    row.appendChild(info);
-    row.appendChild(btn);
-    host.appendChild(row);
-  }
-}
-
-function renderAppleAccessoryOptions(accessories) {
-  const select = document.getElementById('apple-accessory-select');
+function fillSelect(id, tags, labelFn) {
+  const select = document.getElementById(id);
   if (!select) return;
-
-  const previousValues = new Set(Array.from(select.selectedOptions || []).map((option) => option.value));
-  select.innerHTML = '';
-  select.appendChild(makeOption('', 'Select an Apple accessory'));
-
-  const rows = Array.isArray(accessories) ? accessories : [];
-  for (const accessory of rows) {
-    if (!accessory || typeof accessory !== 'object') continue;
-    const identity = accessory.id != null ? String(accessory.id) : (accessory.name || '');
-    if (!identity) continue;
-    const value = JSON.stringify([accessory.source_file || '', identity]);
-    const label = accessory.name || ('Tracker #' + identity);
-    const count = typeof accessory.key_count === 'number' ? accessory.key_count : 0;
-    const source = accessory.source_file || 'unknown';
-    const option = makeOption(value, label + ' (' + count + ' keys, ' + source + ')');
-    if (previousValues.has(value)) option.selected = true;
-    select.appendChild(option);
-  }
+  const previous = new Set(Array.from(select.selectedOptions || []).map(o => o.value));
+  replaceChildren(select, tags.map(tag => {
+    const option = el('option', { value: tag.id, text: labelFn(tag) });
+    option.selected = previous.has(tag.id);
+    return option;
+  }));
 }
 
-function makeOption(value, label) {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = label;
-  return option;
-}
-
-function renderGoogleCompoundOptions(compounds) {
-  const select = document.getElementById('google-compound-name');
-  if (!select) return;
-
-  lastGoogleCompounds = Array.isArray(compounds) ? compounds : [];
-  const previousValues = new Set(Array.from(select.selectedOptions || []).map((option) => option.value));
-  select.innerHTML = '';
-  select.appendChild(makeOption('', 'Select a compound'));
-
-  for (const compound of lastGoogleCompounds) {
-    if (!compound || typeof compound !== 'object') continue;
-    const value = compound.base_name || compound.compound_id;
-    if (!value) continue;
-    const label = compound.base_name || compound.compound_id;
-    const requested = typeof compound.requested_key_count === 'number' ? compound.requested_key_count : 0;
-    const subtitle = requested ? ' (' + requested + ' keys)' : '';
-    const option = makeOption(value, label + subtitle);
-    if (previousValues.has(value)) option.selected = true;
-    select.appendChild(option);
-  }
-}
-
-function deriveGoogleTargetValue(target) {
-  return target && (target.canonic_id || target.canonicId || target.target_id || target.device_id || target.deviceId || target.id || target.label || target.resolved_device_name || target.name) || '';
-}
-
-function deriveGoogleTargetLabel(target) {
-  if (!target || typeof target !== 'object') return 'Unknown target';
-  return target.label || target.resolved_device_name || target.name || target.compound_name || target.canonic_id || target.canonicId || target.id || 'Google target';
-}
-
-function renderGoogleTargetOptions(payload) {
-  const select = document.getElementById('google-canonic-id');
-  if (!select) return;
-
-  const includeCompounds = Boolean(document.getElementById('google-expand-compounds') && document.getElementById('google-expand-compounds').checked);
-
-  const previousValues = new Set(Array.from(select.selectedOptions || []).map((option) => option.value));
-  select.innerHTML = '';
-  select.appendChild(makeOption('', 'Select a tracker'));
-
-  const rows = Array.isArray(payload && payload.targets) ? payload.targets : [];
-  lastGoogleTargets = rows;
-
-  for (const target of rows) {
-    const value = deriveGoogleTargetValue(target);
-    if (!value) continue;
-    const label = deriveGoogleTargetLabel(target);
-    const option = makeOption(value, label);
-    if (previousValues.has(value)) option.selected = true;
-    select.appendChild(option);
-  }
-
-  if (includeCompounds) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = 'Compound pieces';
-    for (const compound of lastGoogleCompounds) {
-      if (!compound || typeof compound !== 'object') continue;
-      const compoundLabel = compound.base_name || compound.compound_id;
-      const subtags = Array.isArray(compound.subtags) ? compound.subtags : [];
-      for (const subtag of subtags) {
-        if (!subtag || typeof subtag !== 'object') continue;
-        const pieceName = subtag.name || '';
-        if (!pieceName) continue;
-        const pieceLabel = compoundLabel + ' / ' + pieceName;
-        const option = makeOption(pieceLabel, pieceLabel + (subtag.key_count ? ' (' + subtag.key_count + ' keys)' : ''));
-        if (previousValues.has(pieceLabel)) option.selected = true;
-        optgroup.appendChild(option);
-      }
-    }
-    if (optgroup.children.length > 0) select.appendChild(optgroup);
-  }
-}
-
-function refreshGoogleTargetOptions() {
-  renderGoogleTargetOptions({ targets: lastGoogleTargets });
+function renderFetchSelects() {
+  const tags = allTags().filter(t => !t.missing);
+  fillSelect('apple-accessory-select', tags.filter(t => t.provider === 'apple'),
+    t => t.name + ' (' + plural(t.key_count || 0, 'key') + ')');
+  fillSelect('google-tag-select', tags.filter(t => t.provider === 'google'),
+    t => t.name + (t.kind === 'compound' ? ' (' + plural((t.subtags || []).length, 'subtag') + ')' : ''));
 }
 
 function getMultiSelectedValues(selectId) {
   const select = document.getElementById(selectId);
   if (!select) return [];
-  return Array.from(select.selectedOptions || [])
-    .map((option) => option.value)
-    .filter((value) => Boolean(value));
+  return Array.from(select.selectedOptions || []).map(o => o.value).filter(Boolean);
 }
 
-async function getJson(path) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const res = await fetch(path, { credentials: 'same-origin', signal: controller.signal });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
-    return data;
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error('Loading server data timed out.');
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function postFile(path, file) {
-  const body = new FormData();
-  body.append('file', file);
-  const res = await fetch(path, { method: 'POST', body, credentials: 'same-origin' });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Upload failed');
-  return data;
-}
-
-async function postJson(path, payload, timeoutMs = 420000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(payload || {}),
-      signal: controller.signal
+// ── Keys tab ──
+function keyRow(provider, name, meta, details) {
+  const header = el('div', { className: 'key-row-header' }, [
+    el('div', { className: 'key-row-info' }, [
+      el('span', { className: 'key-name', text: name }),
+      el('span', { className: 'key-meta', text: meta })
+    ])
+  ]);
+  const row = el('div', { className: 'key-row ' + provider }, [header]);
+  if (details && details.length) {
+    const panel = el('div', { className: 'key-row-details' }, details);
+    const button = el('button', { type: 'button', className: 'key-row-expand-btn', text: '▼' });
+    button.addEventListener('click', () => {
+      button.textContent = panel.classList.toggle('open') ? '▲' : '▼';
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
-    return data;
-  } catch (err) {
-    if (err.name === 'AbortError') throw new Error('Fetch timed out. Check history before retrying; server work may still be finishing.');
-    throw err;
-  } finally {
-    clearTimeout(timer);
+    header.appendChild(button);
+    row.appendChild(panel);
   }
+  return row;
+}
+
+function renderAppleTagList() {
+  const tags = allTags().filter(t => t.provider === 'apple');
+  replaceChildren(document.getElementById('apple-accessories-list'), tags.length === 0
+    ? hint('No Apple tags uploaded yet.')
+    : tags.map(t => keyRow('apple', t.name,
+      plural(t.key_count || 0, 'key') + ' | ' + ((t.files || []).join(', ') || 'missing key file'))));
+}
+
+function renderGoogleTagList() {
+  const tags = allTags().filter(t => t.provider === 'google');
+  replaceChildren(document.getElementById('google-targets-list'), tags.length === 0
+    ? hint('No Google tags found. Upload secrets.json, then sync with Google.')
+    : tags.map(t => {
+      const subtags = t.subtags || [];
+      const meta = t.kind === 'compound'
+        ? 'compound | ' + (t.key_count ? plural(t.key_count, 'key') + ' | ' : '') + plural(subtags.length, 'subtag')
+        : 'tracker';
+      return keyRow('google', t.name, meta, subtags.map(s => el('div', { className: 'key-subtag' }, [
+        el('span', { className: 'key-subtag-name', text: s.name }),
+        el('span', { className: 'key-subtag-count', text: plural(s.key_count || 0, 'key') })
+      ])));
+    }));
+}
+
+function fileRow(file) {
+  return el('div', { className: 'file-row' }, [
+    el('div', { className: 'file-info' }, [
+      el('a', {
+        className: 'file-name-link', text: file.filename, title: 'Download',
+        href: '/api/keyfiles/' + encodeURIComponent(file.filename) + '/download'
+      }),
+      el('span', { text: file.size + ' bytes | ' + formatTime(file.updated_unix) })
+    ]),
+    el('button', { type: 'button', className: 'delete-btn', text: 'Delete', dataset: { filename: file.filename } })
+  ]);
 }
 
 async function refreshFiles() {
+  let files = [];
   try {
-    const data = await getJson('/api/keyfiles');
-    renderAppleFiles(data.files || []);
-    renderGoogleFiles(data.files || []);
-  } catch (err) {
-    renderAppleFiles([]);
-    renderGoogleFiles([]);
+    files = (await getJson('/api/keyfiles')).files || [];
+  } catch (err) { /* lists stay empty */ }
+  const apple = files.filter(f => f.category === 'accessories');
+  const google = files.filter(f => f.category === 'secrets');
+  replaceChildren(document.getElementById('apple-files-list'), apple.map(fileRow));
+  replaceChildren(document.getElementById('google-files-list'),
+    google.length ? google.map(fileRow) : hint('No secrets.json uploaded.'));
+  const googleHint = document.getElementById('google-upload-hint');
+  if (googleHint) {
+    googleHint.textContent = google.length
+      ? 'Uploading a new secrets.json replaces the current one; tags that still exist keep their history.'
+      : '';
   }
 }
 
 async function deleteKeyfile(filename) {
-  const res = await fetch('/api/keyfiles/' + encodeURIComponent(filename), {
-    method: 'DELETE',
-    credentials: 'same-origin'
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Delete failed');
-  return data;
+  const res = await fetch('/api/keyfiles/' + encodeURIComponent(filename), { method: 'DELETE', credentials: 'same-origin' });
+  return readJson(res);
 }
 
-// ── Tags rendering (structured cards) ──
-function renderTags(data) {
-  const container = document.getElementById('tags-container');
-  if (!container) return;
-
-
-  const appleTags = data.apple_tags || [];
-  const googleCompounds = data.google_compounds || [];
-
-  if (appleTags.length === 0 && googleCompounds.length === 0) {
-    container.innerHTML = '<p class="hint">No tags found. Upload key files to get started.</p>';
-    return;
+// ── Devices tab ──
+function renderDevicesTagList() {
+  const host = document.getElementById('devices-tag-list');
+  const tags = allTags();
+  for (const id of Array.from(selectedDeviceTags)) {
+    if (!tags.some(t => t.id === id)) selectedDeviceTags.delete(id);
   }
-
-  let html = '';
-  for (const tag of appleTags) {
-    html += '<div class="tag-card apple"><div class="tag-name">' + (tag.name || 'Tracker #' + tag.id) + '</div><div class="tag-meta">' + tag.key_count + ' keys | ' + (tag.source_file || 'unknown') + '</div></div>';
-  }
-  for (const compound of googleCompounds) {
-    const subtagCount = compound.subtags ? compound.subtags.length : 0;
-    html += '<div class="tag-card google"><div class="tag-name">' + (compound.base_name || compound.compound_id) + '</div><div class="tag-meta">' + compound.requested_key_count + ' keys | ' + subtagCount + ' subtags</div></div>';
-  }
-  container.innerHTML = html;
-}
-
-async function refreshTags() {
-  try {
-    const data = await getJson('/api/tags/raw');
-    renderTags(data);
-    renderAppleAccessoryOptions(data.apple_tags || []);
-    renderGoogleCompoundOptions(data.google_compounds || []);
-    renderAppleAccessoriesList(data.apple_tags || []);
-    await listGoogleTargets(false);
-  } catch (err) {
-    const container = document.getElementById('tags-container');
-    if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-
-  }
-}
-
-// ── Devices ──
-
-let allDeviceTags = []; // All available tags for the devices tab
-
-async function refreshDevices() {
-  try {
-    const [devicesData, tagsData] = await Promise.all([
-      getJson('/api/devices'),
-      getJson('/api/tags/raw')
+  replaceChildren(host, tags.length === 0 ? hint('No tags available. Upload key files first.') : tags.map(tag => {
+    const checkbox = el('input', { type: 'checkbox', value: tag.id });
+    checkbox.checked = selectedDeviceTags.has(tag.id);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedDeviceTags.add(tag.id); else selectedDeviceTags.delete(tag.id);
+    });
+    return el('label', { className: 'devices-tag-item ' + tag.provider }, [
+      checkbox,
+      deviceIcon(tag.device),
+      el('span', { className: 'tag-item-name' }, [
+        tag.name,
+        tag.device.auto_created ? null : el('span', { className: 'tag-item-device', text: ' — in ' + tag.device.name })
+      ]),
+      el('span', { className: 'tag-item-provider ' + tag.provider, text: tag.provider })
     ]);
-    renderDevices(devicesData.devices || []);
-    renderDevicesTagList(tagsData);
-  } catch (err) {
-    const container = document.getElementById('devices-container');
-    if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">Failed to load devices.</p>';
-  }
+  }));
 }
 
-function renderDevicesTagList(tagsData) {
-  const container = document.getElementById('devices-tag-list');
-  if (!container) return;
-  container.innerHTML = '';
-
-  allDeviceTags = [];
-  const appleTags = tagsData.apple_tags || [];
-  const googleCompounds = tagsData.google_compounds || [];
-
-  for (const tag of appleTags) {
-    allDeviceTags.push({
-      provider: 'apple',
-      tag_id: tag.id || tag.source_file || 'apple-' + Math.random().toString(36).slice(2, 8),
-      tag_name: tag.name || ('Tracker #' + tag.id)
-    });
-  }
-  for (const compound of googleCompounds) {
-    allDeviceTags.push({
-      provider: 'google',
-      tag_id: compound.compound_id || compound.base_name,
-      tag_name: compound.base_name || compound.compound_id
-    });
-  }
-
-  if (allDeviceTags.length === 0) {
-    container.innerHTML = '<p class="hint">No tags available. Upload key files first.</p>';
-    return;
-  }
-
-  for (const tag of allDeviceTags) {
-    const item = document.createElement('label');
-    item.className = 'devices-tag-item ' + tag.provider;
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = tag.tag_id;
-    if (selectedDeviceTags.has(tag.tag_id)) {
-      cb.checked = true;
-    }
-    cb.addEventListener('change', () => {
-      if (cb.checked) {
-        selectedDeviceTags.add(tag.tag_id);
-      } else {
-        selectedDeviceTags.delete(tag.tag_id);
-      }
-    });
-
-    const name = document.createElement('span');
-    name.className = 'tag-item-name';
-    name.textContent = tag.tag_name;
-
-    const provider = document.createElement('span');
-    provider.className = 'tag-item-provider ' + tag.provider;
-    provider.textContent = tag.provider;
-
-    item.appendChild(cb);
-    item.appendChild(name);
-    item.appendChild(provider);
-    container.appendChild(item);
-  }
-}
-
-function renderDevices(devices) {
-  const container = document.getElementById('devices-container');
-  if (!container) return;
-  container.innerHTML = '';
-
+function renderDevices() {
+  const host = document.getElementById('devices-container');
+  const devices = customDevices();
   if (devices.length === 0) {
-    container.innerHTML = '<p class="hint">No devices yet. Select tags above and click "+ Create Device".</p>';
+    replaceChildren(host, hint('No devices yet. Tick tags on the left and click "+ Create Device". ' +
+      'A device can also hold a single tag if you want to give it its own name, icon or history retention.'));
     return;
   }
-
-  for (const device of devices) {
-    const card = document.createElement('div');
-    card.className = 'device-card';
-    card.dataset.deviceId = device.id;
-
-    // Color accent bar
-    const accent = document.createElement('div');
-    accent.className = 'device-accent';
-    accent.style.background = device.color || '#888888';
-    card.appendChild(accent);
-
-    // Device name
-    const name = document.createElement('div');
-    name.className = 'device-name';
-    name.textContent = device.name;
-    card.appendChild(name);
-
-    // Tag chips
-    const tagsDiv = document.createElement('div');
-    tagsDiv.className = 'device-tags';
-    const tags = device.tags || [];
-    for (const tag of tags) {
-      const chip = document.createElement('span');
-      chip.className = 'device-tag-chip ' + (tag.provider || '');
-      chip.textContent = tag.tag_name || tag.tag_id || 'unknown';
-      tagsDiv.appendChild(chip);
-    }
-    card.appendChild(tagsDiv);
-
-    // Delete button
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'delete-btn';
-    deleteBtn.title = 'Delete device';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => deleteDeviceHandler(device.id, card));
-    card.appendChild(deleteBtn);
-
-    container.appendChild(card);
-  }
-}
-
-async function deleteDeviceHandler(deviceId, cardEl) {
-  try {
-    const res = await fetch('/api/devices/' + encodeURIComponent(deviceId), {
-      method: 'DELETE',
-      credentials: 'same-origin'
+  const max = inventory.max_retention_days;
+  replaceChildren(host, devices.map(device => {
+    const retention = el('input', {
+      type: 'number', min: '1', max: max || '', step: '1', style: 'width: 6em',
+      placeholder: max ? String(max) : 'forever', value: device.retention_days || ''
     });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to delete device');
-    }
-    cardEl.remove();
-    if (!document.querySelector('.device-card')) {
-      refreshDevices();
-    }
+    const save = el('button', { type: 'button', text: 'Save' });
+    save.addEventListener('click', withLoading(save, async () => {
+      const raw = retention.value.trim();
+      try {
+        await sendJson('PUT', '/api/devices/' + encodeURIComponent(device.id), { retention_days: raw ? parseInt(raw, 10) : null });
+        await refreshInventory();
+      } catch (err) {
+        alert('Could not save retention: ' + err.message);
+      }
+    }));
+    const effective = device.effective_retention_days ? device.effective_retention_days + ' days' : 'forever';
+    return el('div', { className: 'device-card', dataset: { deviceId: device.id } }, [
+      el('div', { className: 'device-accent', style: 'background:' + device.color }),
+      el('div', { className: 'device-body' }, [
+        el('div', { className: 'device-header' }, [
+          deviceIcon(device),
+          el('div', { className: 'device-name', text: device.name }),
+          el('div', { className: 'device-actions' }, [
+            el('button', { type: 'button', text: 'Edit', onclick: () => openDeviceModal(device) }),
+            el('button', {
+              type: 'button', className: 'delete-btn', text: 'Ungroup',
+              title: 'Dissolve this device; its tags are tracked on their own again',
+              onclick: () => ungroupDevice(device)
+            })
+          ])
+        ]),
+        el('div', { className: 'device-tags' }, device.tags.map(tagChip)),
+        el('label', { className: 'device-retention' }, [
+          'Keep history for', retention, 'days',
+          el('small', { text: '(effective: ' + effective + ')' }),
+          save
+        ])
+      ])
+    ]);
+  }));
+}
+
+async function ungroupDevice(device) {
+  const ok = await confirmDialog({
+    title: 'Ungroup "' + device.name + '"?',
+    body: [el('p', { text: 'Its ' + plural(device.tags.length, 'tag') + ' will be tracked on their own again. ' +
+      'Location history is kept; the device name, icon and retention setting are removed.' })],
+    confirmLabel: 'Ungroup'
+  });
+  if (!ok) return;
+  try {
+    await sendJson('DELETE', '/api/devices/' + encodeURIComponent(device.id));
+    await refreshInventory();
   } catch (err) {
-    alert('Failed to delete device: ' + err);
+    alert('Failed to ungroup device: ' + err.message);
   }
 }
 
-// ── Build Device Modal ──
+// ── Device Modal (create / edit) ──
+function setModalColor(color) {
+  const swatches = document.querySelectorAll('.color-swatch');
+  const custom = document.getElementById('device-custom-color');
+  let matched = false;
+  swatches.forEach(s => {
+    const hit = !matched && s.dataset.color.toLowerCase() === String(color).toLowerCase();
+    s.classList.toggle('active', hit);
+    matched = matched || hit;
+  });
+  if (custom) {
+    custom.value = color;
+    custom.classList.toggle('active', !matched);
+  }
+}
 
-function openBuildDeviceModal() {
-  if (selectedDeviceTags.size < 2) {
-    alert('Please select at least 2 tags to create a device.');
+function setModalIcon(icon) {
+  document.querySelectorAll('#device-icon-picker .icon-option').forEach(b => {
+    b.classList.toggle('active', b.dataset.icon === icon);
+  });
+}
+
+function selectedIcon() {
+  const active = document.querySelector('#device-icon-picker .icon-option.active');
+  return active ? active.dataset.icon : DEFAULT_DEVICE_ICON;
+}
+
+function openDeviceModal(device) {
+  editingDevice = device || null;
+  if (!editingDevice && selectedDeviceTags.size < 1) {
+    alert('Select the tags that belong to this device first.');
     return;
   }
-  _populateBuildModal();
+  document.getElementById('device-modal-title').textContent = editingDevice ? 'Edit Device' : 'Create Device';
+  document.getElementById('modal-create-btn').textContent = editingDevice ? 'Save' : 'Create Device';
+  document.getElementById('device-name-input').value = editingDevice ? editingDevice.name : '';
+  const firstSwatch = document.querySelector('.color-swatch');
+  setModalColor(editingDevice ? editingDevice.color : (firstSwatch ? firstSwatch.dataset.color : '#ff961f'));
+  setModalIcon(editingDevice && DEVICE_ICONS.includes(editingDevice.icon) ? editingDevice.icon : DEFAULT_DEVICE_ICON);
+
+  const tags = editingDevice ? editingDevice.tags : allTags().filter(t => selectedDeviceTags.has(t.id));
+  replaceChildren(document.getElementById('device-tag-checklist'), tags.map(tag =>
+    el('div', { className: 'tag-checklist-item ' + tag.provider }, [
+      el('span', { className: 'tag-label', text: tag.name }),
+      el('span', { className: 'tag-provider ' + tag.provider, text: tag.provider })
+    ])));
+  updateDeviceModalState();
   document.getElementById('build-device-modal').style.display = 'flex';
+  document.getElementById('device-name-input').focus();
 }
 
 function closeBuildDeviceModal() {
   document.getElementById('build-device-modal').style.display = 'none';
+  editingDevice = null;
 }
 
-function _populateBuildModal() {
-  // Reset form
-  document.getElementById('device-name-input').value = '';
-  const swatches = document.querySelectorAll('.color-swatch');
-  swatches.forEach(s => s.classList.remove('active'));
-  if (swatches[0]) swatches[0].classList.add('active');
-
-  // Reset custom color input
-  const customColorInput = document.getElementById('custom-color-input');
-  if (customColorInput) {
-    customColorInput.classList.remove('active');
-    customColorInput.value = swatches[0].dataset.color;
-  }
-
-  // Render only selected tags in the checklist
-  const checklist = document.getElementById('device-tag-checklist');
-  checklist.innerHTML = '';
-
-  const selectedTags = allDeviceTags.filter(t => selectedDeviceTags.has(t.tag_id));
-  for (const tag of selectedTags) {
-    const item = document.createElement('div');
-    item.className = 'tag-checklist-item ' + tag.provider;
-
-    const label = document.createElement('span');
-    label.className = 'tag-label';
-    label.textContent = tag.tag_name;
-
-    const provider = document.createElement('span');
-    provider.className = 'tag-provider ' + tag.provider;
-    provider.textContent = tag.provider;
-
-    item.appendChild(label);
-    item.appendChild(provider);
-    checklist.appendChild(item);
-  }
-
-  _updateDeviceTagCount();
-}
-
-function _updateDeviceTagCount() {
-  const labelEl = document.getElementById('device-tags-label');
-  const createBtn = document.getElementById('modal-create-btn');
-  const nameInput = document.getElementById('device-name-input');
-
-  if (labelEl) {
-    labelEl.textContent = 'Selected tags: ' + selectedDeviceTags.size;
-  }
-
-  // Enable create button only if name is provided and at least 2 tags selected
-  createBtn.disabled = !(selectedDeviceTags.size >= 2 && nameInput.value.trim());
-}
-
-function _getSelectedColor() {
-  const activeSwatch = document.querySelector('.color-swatch.active');
-  const customColorInput = document.getElementById('custom-color-input');
-  if (customColorInput && customColorInput.classList.contains('active')) {
-    return customColorInput.value;
-  }
-  if (activeSwatch) return activeSwatch.dataset.color;
-  return '#888888';
-}
-
-async function createDevice() {
+function updateDeviceModalState() {
+  const count = editingDevice ? editingDevice.tags.length : selectedDeviceTags.size;
+  const label = document.getElementById('device-tags-label');
+  if (label) label.textContent = (editingDevice ? 'Tags: ' : 'Selected tags: ') + count;
   const name = document.getElementById('device-name-input').value.trim();
-  const color = _getSelectedColor();
+  document.getElementById('modal-create-btn').disabled = !(count >= 1 && name);
+}
 
-  const selectedTags = allDeviceTags
-    .filter(t => selectedDeviceTags.has(t.tag_id))
-    .map(t => ({
-      provider: t.provider,
-      tag_id: t.tag_id,
-      tag_name: t.tag_name
-    }));
+function selectedColor() {
+  const custom = document.getElementById('device-custom-color');
+  if (custom && custom.classList.contains('active')) return custom.value;
+  const active = document.querySelector('.color-swatch.active');
+  return active ? active.dataset.color : '#ff961f';
+}
 
-  if (!name || selectedTags.length < 2) {
-    return;
-  }
-
+async function saveDeviceModal() {
+  const name = document.getElementById('device-name-input').value.trim();
+  if (!name) return;
+  const fields = { name, color: selectedColor(), icon: selectedIcon() };
   try {
-    const res = await fetch('/api/devices', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, color, tags: selectedTags })
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to create device');
+    if (editingDevice) {
+      await sendJson('PUT', '/api/devices/' + encodeURIComponent(editingDevice.id), fields);
+    } else {
+      if (selectedDeviceTags.size < 1) return;
+      await postJson('/api/devices', Object.assign(fields, { tag_ids: Array.from(selectedDeviceTags) }));
+      selectedDeviceTags.clear();
     }
     closeBuildDeviceModal();
-    await refreshDevices();
+    await refreshInventory();
   } catch (err) {
-    alert('Failed to create device: ' + err);
+    alert('Failed to save device: ' + err.message);
   }
 }
-
-// ── Modal event setup ──
 
 function initBuildDeviceModal() {
   const modal = document.getElementById('build-device-modal');
   if (!modal) return;
+  document.getElementById('build-device-btn').addEventListener('click', () => openDeviceModal(null));
+  document.getElementById('modal-close-btn').addEventListener('click', closeBuildDeviceModal);
+  document.getElementById('modal-cancel-btn').addEventListener('click', closeBuildDeviceModal);
+  document.getElementById('modal-create-btn').addEventListener('click', saveDeviceModal);
+  document.getElementById('device-name-input').addEventListener('input', updateDeviceModalState);
 
-  // Open button
-  const openBtn = document.getElementById('build-device-btn');
-  if (openBtn) openBtn.addEventListener('click', openBuildDeviceModal);
-
-  // Close buttons
-  const closeBtn = document.getElementById('modal-close-btn');
-  if (closeBtn) closeBtn.addEventListener('click', closeBuildDeviceModal);
-  const cancelBtn = document.getElementById('modal-cancel-btn');
-  if (cancelBtn) cancelBtn.addEventListener('click', closeBuildDeviceModal);
-
-  // Create button
-  const createBtn = document.getElementById('modal-create-btn');
-  if (createBtn) createBtn.addEventListener('click', createDevice);
-
-  // Color picker
   const swatches = document.querySelectorAll('.color-swatch');
-  const customColorInput = document.getElementById('custom-color-input');
-  swatches.forEach(swatch => {
-    swatch.addEventListener('click', () => {
+  const custom = document.getElementById('device-custom-color');
+  swatches.forEach(swatch => swatch.addEventListener('click', () => setModalColor(swatch.dataset.color)));
+  if (custom) {
+    custom.addEventListener('input', () => {
       swatches.forEach(s => s.classList.remove('active'));
-      swatch.classList.add('active');
-      if (customColorInput) customColorInput.classList.remove('active');
-      if (customColorInput) customColorInput.value = swatch.dataset.color;
-    });
-  });
-  if (customColorInput) {
-    customColorInput.addEventListener('input', () => {
-      swatches.forEach(s => s.classList.remove('active'));
-      customColorInput.classList.add('active');
+      custom.classList.add('active');
     });
   }
+  replaceChildren(document.getElementById('device-icon-picker'), DEVICE_ICONS.map(icon =>
+    el('button', {
+      type: 'button', className: 'icon-option', title: icon.replace(/-/g, ' '),
+      dataset: { icon }, onclick: () => setModalIcon(icon)
+    }, faIcon(icon))));
+  modal.addEventListener('click', e => { if (e.target === modal) closeBuildDeviceModal(); });
+}
 
-  // Name input change - revalidate create button
-  const nameInput = document.getElementById('device-name-input');
-  if (nameInput) nameInput.addEventListener('input', () => _updateDeviceTagCount());
-
-  // Close on overlay click
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) closeBuildDeviceModal();
+// ── Confirm dialog ──
+function confirmDialog({ title, body, confirmLabel = 'Delete' }) {
+  const modal = document.getElementById('confirm-modal');
+  document.getElementById('confirm-modal-title').textContent = title;
+  replaceChildren(document.getElementById('confirm-modal-body'), body);
+  const ok = document.getElementById('confirm-ok-btn');
+  ok.textContent = confirmLabel;
+  modal.style.display = 'flex';
+  ok.focus();
+  return new Promise(resolve => {
+    const controller = new AbortController();
+    const finish = result => {
+      controller.abort();
+      modal.style.display = 'none';
+      resolve(result);
+    };
+    const opts = { signal: controller.signal };
+    ok.addEventListener('click', () => finish(true), opts);
+    document.getElementById('confirm-cancel-btn').addEventListener('click', () => finish(false), opts);
+    document.getElementById('confirm-close-btn').addEventListener('click', () => finish(false), opts);
+    modal.addEventListener('click', e => { if (e.target === modal) finish(false); }, opts);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') finish(false); }, opts);
   });
 }
-function renderStatus(data) {
-  const container = document.getElementById('status-container');
-  if (!container) return;
 
-
-  const providers = [
-    { key: 'google', label: 'Google' },
-    { key: 'apple', label: 'Apple' },
-    { key: 'apple_merge', label: 'Apple Merge' }
-  ];
-
-  let html = '';
-  for (const { key, label } of providers) {
-    const status = data[key];
-    let dotClass = 'none';
-    let text = 'No data';
-    if (status) {
-      if (status.ok === false) { dotClass = 'error'; text = status.error || 'Failed'; }
-      else if (status.ok === true) { dotClass = 'ok'; text = status.kind || 'OK'; }
-    }
-    const timeStr = status && status.timestamp_unix ? new Date(status.timestamp_unix * 1000).toLocaleTimeString() : '';
-    html += '<div class="status-badge"><span class="status-dot ' + dotClass + '"></span><span class="status-label">' + label + '</span><span>' + text + '</span>' + (timeStr ? '<span class="status-time">' + timeStr + '</span>' : '') + '</div>';
+function deletePreviewBody(preview) {
+  const nodes = [];
+  if (preview.devices.length === 0) {
+    nodes.push(el('p', { text: 'No tags are removed: every tag in this file is also in another key file.' }));
+    return nodes;
   }
-  container.innerHTML = html;
+  nodes.push(el('p', { className: 'confirm-summary', text: 'This permanently deletes ' +
+    plural(preview.tags_removed, 'tag') + ' and ' + plural(preview.events_removed, 'stored location') + ':' }));
+  for (const device of preview.devices) {
+    const tagNames = device.tags.map(t => t.name + ' (' + t.provider + ')').join(', ');
+    let what;
+    if (!device.custom) what = 'Tag is removed';
+    else if (device.deleted) what = 'Device is deleted (all ' + plural(device.tag_count, 'tag') + ')';
+    else what = 'Device keeps ' + plural(device.tag_count - device.tags.length, 'tag') + ' but loses ' + tagNames;
+    nodes.push(el('div', { className: 'confirm-device' }, [
+      deviceIcon({ auto_created: !device.custom, icon: device.icon, color: device.color }),
+      el('div', {}, [
+        el('strong', { text: device.name }),
+        el('p', { text: what }),
+        device.custom && !device.deleted ? null : el('p', { text: tagNames }),
+        el('p', { text: plural(device.events, 'location') + ' of history lost' })
+      ])
+    ]));
+  }
+  return nodes;
 }
+
+// ── Status ──
+const STATUS_ROWS = [
+  { key: 'apple', label: 'Apple fetch' },
+  { key: 'google', label: 'Google fetch' },
+  { key: 'google_keys', label: 'Google key announcement' }
+];
 
 async function refreshStatus() {
+  const host = document.getElementById('status-container');
+  let data;
   try {
-    const data = await getJson('/api/status/fetch');
-    renderStatus(data);
+    data = await getJson('/api/status');
   } catch (err) {
-    const container = document.getElementById('status-container');
-    if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-
+    replaceChildren(host, hint(String(err), true));
+    return;
   }
+  replaceChildren(host, STATUS_ROWS.map(({ key, label }) => {
+    const status = data[key];
+    let dot = 'none';
+    let text = 'No data yet';
+    if (status) {
+      dot = status.ok ? 'ok' : 'error';
+      text = status.ok ? (status.kind || 'OK').replace(/_/g, ' ') : (status.error || 'Failed');
+    }
+    return el('div', { className: 'status-badge' }, [
+      el('span', { className: 'status-dot ' + dot }),
+      el('span', { className: 'status-label', text: label }),
+      el('span', { text }),
+      status && status.timestamp_unix ? el('span', { className: 'status-time', text: formatTime(status.timestamp_unix) }) : null
+    ]);
+  }));
 }
 
-// ── Alerts rendering ──
-function renderAlerts(data) {
-  const container = document.getElementById('errors-container');
-  if (!container) return;
-
-
-  const alerts = data.alerts || [];
-  if (alerts.length === 0) { container.innerHTML = '<p class="hint">No errors</p>'; return; }
-
-  let html = '';
-  for (const alert of alerts) {
-    const timeStr = alert.created_unix ? new Date(alert.created_unix * 1000).toLocaleString() : '';
-    const typeStr = alert.type ? ' <span class="alert-type">' + alert.type + '</span>' : '';
-    const targetStr = alert.target ? ' <span class="alert-target">[' + (alert.target || '') + ']</span>' : '';
-    html += '<div class="error-item"><strong>' + (alert.provider || 'unknown') + '</strong>: ' + (alert.error || 'Unknown error') + typeStr + targetStr + (timeStr ? '<br><small>' + timeStr + '</small>' : '') + '</div>';
-  }
-  container.innerHTML = html;
-}
-
-async function refreshErrors() {
+// ── Alerts (sticky until dismissed) ──
+async function refreshAlerts() {
+  const host = document.getElementById('errors-container');
+  let alerts;
   try {
-    const data = await getJson('/api/status/alerts');
-    renderAlerts(data);
+    alerts = (await getJson('/api/alerts')).alerts || [];
   } catch (err) {
-    const container = document.getElementById('errors-container');
-    if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-
+    replaceChildren(host, hint(String(err), true));
+    return;
   }
+  if (alerts.length === 0) {
+    replaceChildren(host, hint('No alerts'));
+    return;
+  }
+  replaceChildren(host, alerts.map(alert => {
+    const dismiss = el('button', { type: 'button', className: 'delete-btn', text: '×', title: 'Dismiss', style: 'float: right; padding: 0 8px' });
+    dismiss.addEventListener('click', async () => {
+      try {
+        await postJson('/api/alerts/' + alert.id + '/dismiss');
+      } finally {
+        refreshAlerts();
+      }
+    });
+    const when = alert.count > 1
+      ? plural(alert.count, 'time') + ', last ' + formatTime(alert.last_unix)
+      : formatTime(alert.last_unix);
+    return el('div', { className: 'error-item' }, [
+      dismiss,
+      el('strong', { text: alert.provider }), ': ', alert.message,
+      alert.type ? el('span', { className: 'alert-type', text: ' ' + alert.type.replace(/_/g, ' ') }) : null,
+      alert.target ? el('span', { className: 'alert-target', text: ' [' + alert.target + ']' }) : null,
+      el('br'), el('small', { text: when })
+    ]);
+  }));
 }
 
-// ── History rendering ──
+// ── History ──
 function renderHistoryMap(events, options = {}) {
-  if (!map || !markerLayer || !window.L) {
-    console.warn('renderHistoryMap: map not ready', { hasMap: !!map, hasMarkerLayer: !!markerLayer, hasLeaflet: !!window.L });
-    return;
-  }
+  if (!map || !markerLayer || !window.L) return;
+  markerLayer.clearLayers();
+  if (polylineLayer) polylineLayer.clearLayers();
 
-  try {
-    markerLayer.clearLayers();
-    if (polylineLayer) polylineLayer.clearLayers();
-  } catch (err) {
-    console.error('renderHistoryMap: layer clear error', err);
-    return;
-  }
-
-  const connectDots = options.connectDots || false;
-  const highlightLatest = options.highlightLatest !== false;
-
-  // Sort by timestamp ascending for connection order
   const sorted = [...(events || [])].sort((a, b) => (a.timestamp_unix || 0) - (b.timestamp_unix || 0));
-  const points = [];
+  if (!sorted.length) return;
 
-  if (!sorted.length) {
-    console.log('renderHistoryMap: no events to display');
-    return;
-  }
-
-  console.log('renderHistoryMap: rendering', sorted.length, 'events');
-
-  // Track latest timestamp per provider
+  const highlightLatest = options.highlightLatest !== false;
   const latestByProvider = {};
   for (const event of sorted) {
-    const provider = event.provider || 'unknown';
     const ts = event.timestamp_unix || 0;
-    if (!latestByProvider[provider] || ts > latestByProvider[provider]) {
-      latestByProvider[provider] = ts;
-    }
+    if (!latestByProvider[event.provider] || ts > latestByProvider[event.provider]) latestByProvider[event.provider] = ts;
   }
 
+  const points = [];
   for (const event of sorted) {
     if (typeof event.latitude !== 'number' || typeof event.longitude !== 'number') continue;
     points.push([event.latitude, event.longitude]);
-
-    const provider = event.provider || 'unknown';
-    const isLatest = (event.timestamp_unix || 0) === latestByProvider[provider];
-
-    let fillColor = event.provider === 'google' ? '#1f78ff' : '#18a96b';
+    const isLatest = (event.timestamp_unix || 0) === latestByProvider[event.provider];
+    let color = event.provider === 'google' ? '#1f78ff' : '#18a96b';
     let fillOpacity = 0.8;
     let radius = 6;
     let weight = 1;
-
     if (highlightLatest && !isLatest) {
-      fillOpacity = 0.3; // 70% transparent
-    } else if (highlightLatest && isLatest) {
-      fillColor = event.provider === 'google' ? '#1fcbff' : '#29ffa2';
+      fillOpacity = 0.3;
+    } else if (highlightLatest) {
+      color = event.provider === 'google' ? '#1fcbff' : '#29ffa2';
       fillOpacity = 1.0;
       radius = 8;
       weight = 2;
     }
-
-    try {
-      const marker = L.circleMarker([event.latitude, event.longitude], {
-        radius: radius,
-        color: fillColor,
-        fillColor: fillColor,
-        fillOpacity: fillOpacity,
-        weight: weight
-      });
-      marker.bindPopup(
-        event.provider + ' | ' + (event.tag || 'tag') + ' | ' +
-        new Date((event.timestamp_unix || 0) * 1000).toLocaleString() +
-        (isLatest && highlightLatest ? ' LATEST' : '')
-      );
-      marker.addTo(markerLayer);
-    } catch (err) {
-      console.error('renderHistoryMap: marker creation error', err, event);
-    }
+    const popup = el('div', {}, [
+      el('strong', { text: event.tag || 'tag' }), ' (' + event.provider + ')', el('br'),
+      formatTime(event.timestamp_unix),
+      event.part ? el('div', { text: event.part }) : null,
+      isLatest && highlightLatest ? el('div', { text: 'Latest' }) : null
+    ]);
+    L.circleMarker([event.latitude, event.longitude], { radius, color, fillColor: color, fillOpacity, weight })
+      .bindPopup(popup).addTo(markerLayer);
   }
 
-  // Connect dots with polyline
-  if (connectDots && points.length > 1) {
-    if (!polylineLayer) polylineLayer = L.layerGroup().addTo(map);
-    try {
-      const line = L.polyline(points, {
-        color: '#ff8c00',
-        weight: 2,
-        opacity: 0.5,
-        dashArray: '5, 8'
-      });
-      line.addTo(polylineLayer);
-    } catch (err) {
-      console.error('renderHistoryMap: polyline error', err);
-    }
+  if (options.connectDots && points.length > 1) {
+    L.polyline(points, { color: '#ff8c00', weight: 2, opacity: 0.5, dashArray: '5, 8' }).addTo(polylineLayer);
   }
-
-  if (points.length > 0) {
-    try {
-      map.fitBounds(points, { padding: [20, 20], maxZoom: 14 });
-    } catch (err) {
-      console.error('renderHistoryMap: fitBounds error', err);
-    }
-  }
+  if (points.length > 0) map.fitBounds(points, { padding: [20, 20], maxZoom: 14 });
 }
 
-async function refreshCombinedHistory() {
+async function refreshHistory() {
+  const slider = document.getElementById('history-days-slider');
+  const days = slider ? parseInt(slider.value, 10) : 7;
   try {
-    const slider = document.getElementById('history-days-slider');
-    const days = slider ? parseInt(slider.value, 10) : 7;
-    const connectDots = document.getElementById('connect-dots-toggle')?.checked || false;
-    const highlightLatest = document.getElementById('highlight-latest-toggle')?.checked !== false;
-
-    console.log('refreshCombinedHistory: days=', days, 'connectDots=', connectDots, 'highlightLatest=', highlightLatest);
-
-    const data = await getJson('/api/history/combined?days=' + encodeURIComponent(days));
-    console.log('refreshCombinedHistory: received', (data.events || []).length, 'events');
-    renderHistoryMap(data.events || [], { connectDots, highlightLatest });
-
+    const data = await getJson('/api/history?days=' + encodeURIComponent(days));
+    renderHistoryMap(data.events || [], {
+      connectDots: document.getElementById('connect-dots-toggle')?.checked || false,
+      highlightLatest: document.getElementById('highlight-latest-toggle')?.checked !== false
+    });
   } catch (err) {
-    console.error('refreshCombinedHistory: error', err);
-
+    console.error('refreshHistory', err);
   }
 }
 
-// ── Google fetch ──
-async function listGoogleTargets(showFeedback = true) {
-  try {
-    const data = await getJson('/api/google/targets');
-    renderGoogleTargetOptions(data);
-    renderGoogleTargetsList(data.targets || [], lastGoogleCompounds);
-    const count = Array.isArray(data.targets) ? data.targets.length : 0;
-    if (showFeedback) {
-      setGoogleFeedback(count > 0 ? 'Loaded ' + count + ' Google target' + (count === 1 ? '' : 's') + '.' : 'No Google targets were returned.');
-    }
-
-  } catch (err) {
-    if (showFeedback) {
-      setGoogleFeedback(String(err), true);
-    }
-
-  }
-}
-
-async function refreshGoogleKeys() {
-  try {
-    const data = await postJson('/api/google/refresh-keys', {});
-    setGoogleFeedback('Google keys refreshed successfully at ' + new Date().toLocaleTimeString());
-
-    await listGoogleTargets(false);
-    refreshGoogleTargetOptions();
-    await refreshStatus();
-  } catch (err) {
-    setGoogleFeedback(String(err), true);
-
-  }
-}
-
+// ── Actions ──
 async function fetchAllSelected() {
   const appleSelected = getMultiSelectedValues('apple-accessory-select');
-  const googleCompoundsSelected = getMultiSelectedValues('google-compound-name');
-  const googleTrackersSelected = getMultiSelectedValues('google-canonic-id');
+  const googleSelected = getMultiSelectedValues('google-tag-select');
+  const feedback = (msg, isError) => setFeedback('google-targets-feedback', msg, isError);
 
-  if (appleSelected.length === 0 && googleCompoundsSelected.length === 0 && googleTrackersSelected.length === 0) {
-    setOverviewGoogleFeedback('Nothing selected. Pick any Apple or Google entries and run fetch.');
+  if (appleSelected.length === 0 && googleSelected.length === 0) {
+    feedback('Nothing selected. Pick Apple or Google tags and run fetch.');
     return;
   }
 
   const failures = [];
-  let successCount = 0;
-
+  let stored = 0;
   if (appleSelected.length > 0) {
     try {
-      setOverviewGoogleFeedback('Fetching selected Apple items; waiting for the rate limit may take up to 3 minutes.');
-      await postJson('/api/apple/fetch', { days: 7, accessory_ids: appleSelected }, 240000);
-      successCount += 1;
+      feedback('Fetching Apple tags; waiting for the rate limit may take up to 3 minutes.');
+      stored += (await postJson('/api/apple/fetch', { days: 7, tag_ids: appleSelected }, 240000)).stored || 0;
     } catch (err) {
-      failures.push('Apple fetch: ' + String(err));
+      failures.push('Apple: ' + err.message);
     }
   }
-
-  for (const compoundName of googleCompoundsSelected) {
+  if (googleSelected.length > 0) {
     try {
-      setOverviewGoogleFeedback('Fetching Google compound: ' + compoundName);
-      await postJson('/api/google/fetch', { compound_name: compoundName });
-      successCount += 1;
+      feedback('Fetching ' + plural(googleSelected.length, 'Google tag') + '; this can take a minute per tag.');
+      const result = await postJson('/api/google/fetch', { tag_ids: googleSelected });
+      stored += result.stored || 0;
+      for (const fail of result.failed || []) failures.push('Google ' + fail.tag + ': ' + fail.error);
     } catch (err) {
-      failures.push('Google compound ' + compoundName + ': ' + String(err));
-    }
-  }
-
-  for (const canonicId of googleTrackersSelected) {
-    try {
-      setOverviewGoogleFeedback('Fetching selected Google tracker.');
-      await postJson('/api/google/fetch', { canonic_id: canonicId });
-      successCount += 1;
-    } catch (err) {
-      failures.push('Google tracker ' + canonicId + ': ' + String(err));
+      failures.push('Google: ' + err.message);
     }
   }
 
   if (failures.length > 0) {
-    setOverviewGoogleFeedback('Completed with errors. Success=' + successCount + ', Failed=' + failures.length + '. ' + failures[0], true);
+    feedback('Completed with errors (' + plural(stored, 'new location') + '). ' + failures.join(' | '), true);
   } else {
-    setOverviewGoogleFeedback('Fetched selected items successfully. Operations=' + successCount + '.');
+    feedback('Done: ' + plural(stored, 'new location') + '.');
   }
-
-  await refreshStatus();
-  await refreshCombinedHistory();
-  await refreshErrors();
+  await Promise.all([refreshStatus(), refreshHistory(), refreshAlerts(), refreshInventory()]);
 }
 
-async function refreshGoogleKeysForSelected() {
-  const googleCompoundsSelected = getMultiSelectedValues('google-compound-name');
-  const googleTrackersSelected = getMultiSelectedValues('google-canonic-id');
-  const totalGoogleSelected = googleCompoundsSelected.length + googleTrackersSelected.length;
-
-  if (totalGoogleSelected === 0) {
-    setOverviewGoogleFeedback('No Google selections found. Key refresh skipped.');
-    return;
-  }
-
+async function syncWithGoogle(feedbackId) {
   try {
-    await postJson('/api/google/refresh-keys', {});
-    setOverviewGoogleFeedback('Google keys refreshed for current selection (' + totalGoogleSelected + ' selected).');
-    await listGoogleTargets(false);
-    await refreshStatus();
+    const status = await postJson('/api/google/sync', {});
+    const d = status.details || {};
+    const parts = ['Synced with Google at ' + new Date().toLocaleTimeString()];
+    if (d.devices_uploaded !== undefined) parts.push(plural(d.devices_uploaded, 'tracker') + ' announced');
+    if (d.tags_added) parts.push(plural(d.tags_added, 'tag') + ' added');
+    if (d.tags_removed) parts.push(plural(d.tags_removed, 'tag') + ' removed (no longer on Google)');
+    setFeedback(feedbackId, parts.join(' | '));
   } catch (err) {
-    setOverviewGoogleFeedback(String(err), true);
-
+    setFeedback(feedbackId, err.message, true);
   }
+  await Promise.all([refreshInventory(), refreshStatus(), refreshAlerts()]);
 }
 
-async function refreshAppleLocations() {
-  try {
-    const data = await postJson('/api/apple/fetch', { days: 7 });
-
-    await refreshStatus();
-  } catch (err) {
-
-  }
+// ── Wiring ──
+function bindClick(id, fn) {
+  const button = document.getElementById(id);
+  if (button) button.addEventListener('click', withLoading(button, fn));
 }
 
-// ── Event listeners ──
+function bindFileDelete(listId, feedbackId) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  list.addEventListener('click', async evt => {
+    const target = evt.target;
+    if (!(target instanceof HTMLElement) || !target.classList.contains('delete-btn')) return;
+    const filename = target.dataset.filename;
+    if (!filename) return;
+    let preview;
+    try {
+      preview = await getJson('/api/keyfiles/' + encodeURIComponent(filename) + '/delete-preview');
+    } catch (err) {
+      setFeedback(feedbackId, err.message, true);
+      return;
+    }
+    const ok = await confirmDialog({ title: 'Delete ' + filename + '?', body: deletePreviewBody(preview) });
+    if (!ok) return;
+    try {
+      const result = await deleteKeyfile(filename);
+      setFeedback(feedbackId, 'Deleted ' + filename + (result.tags_removed ? ' (' + plural(result.tags_removed, 'tag') + ' removed)' : ''));
+    } catch (err) {
+      setFeedback(feedbackId, err.message, true);
+    }
+    await Promise.all([refreshFiles(), refreshInventory(), refreshHistory()]);
+  });
+}
+
+function bindUpload(formId, inputId, path, feedbackId, describe, confirmFn) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.addEventListener('submit', async evt => {
+    evt.preventDefault();
+    const input = document.getElementById(inputId);
+    const file = input && input.files ? input.files[0] : null;
+    if (!file) return;
+    if (confirmFn && !confirmFn()) return;
+    try {
+      const result = await postFile(path, file);
+      setFeedback(feedbackId, describe(result));
+      input.value = '';
+    } catch (err) {
+      setFeedback(feedbackId, err.message, true);
+    }
+    await Promise.all([refreshFiles(), refreshInventory()]);
+  });
+}
+
 function initDashboard() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1169,181 +857,53 @@ function initDashboard() {
       btn.classList.add('active');
       const tab = document.getElementById('tab-' + btn.dataset.tab);
       if (tab) tab.classList.add('active');
+      if (btn.dataset.tab === 'overview' && map) setTimeout(() => map.invalidateSize(), 50);
     });
   });
 
-  // History slider display update
-  const historySlider = document.getElementById('history-days-slider');
-  if (historySlider) {
-    historySlider.addEventListener('input', () => {
-      const valueEl = document.getElementById('history-days-value');
-      if (valueEl) valueEl.textContent = historySlider.value;
+  const slider = document.getElementById('history-days-slider');
+  if (slider) {
+    slider.max = String(inventory.max_retention_days || 30);
+    slider.addEventListener('input', () => {
+      document.getElementById('history-days-value').textContent = slider.value;
     });
+    slider.addEventListener('change', refreshHistory);
   }
+  document.getElementById('connect-dots-toggle')?.addEventListener('change', refreshHistory);
+  document.getElementById('highlight-latest-toggle')?.addEventListener('change', refreshHistory);
 
-  // Re-fetch history on toggle changes
-  const connectDotsToggle = document.getElementById('connect-dots-toggle');
-  if (connectDotsToggle) {
-    connectDotsToggle.addEventListener('change', refreshCombinedHistory);
-  }
+  bindClick('reload-history', refreshHistory);
+  bindClick('clear-alerts-btn', async () => {
+    try { await postJson('/api/alerts/dismiss-all', {}); } finally { await refreshAlerts(); }
+  });
+  bindClick('fetch-selected-btn', fetchAllSelected);
+  bindClick('refresh-keys-selected-btn', () => syncWithGoogle('google-targets-feedback'));
+  bindClick('refresh-google-keys-btn', () => syncWithGoogle('google-feedback'));
 
-  const highlightLatestToggle = document.getElementById('highlight-latest-toggle');
-  if (highlightLatestToggle) {
-    highlightLatestToggle.addEventListener('change', refreshCombinedHistory);
-  }
-
-  const reloadHistoryBtn = document.getElementById('reload-history');
-  if (reloadHistoryBtn) reloadHistoryBtn.addEventListener('click', withLoading(reloadHistoryBtn, refreshCombinedHistory));
-
-  // Clear alerts button
-  const clearAlertsBtn = document.getElementById('clear-alerts-btn');
-  if (clearAlertsBtn) {
-    clearAlertsBtn.addEventListener('click', withLoading(clearAlertsBtn, async () => {
-      try {
-        const data = await postJson('/api/status/alerts/clear', {});
-        await refreshErrors();
-      } catch (err) {
-        const container = document.getElementById('errors-container');
-        if (container) container.innerHTML = '<p class="hint" style="color:#9a2f2f">' + err + '</p>';
-      }
-    }));
-  }
-  const fetchSelectedBtn = document.getElementById('fetch-selected-btn');
-  if (fetchSelectedBtn) fetchSelectedBtn.addEventListener('click', withLoading(fetchSelectedBtn, fetchAllSelected));
-  const refreshKeysSelectedBtn = document.getElementById('refresh-keys-selected-btn');
-  if (refreshKeysSelectedBtn) refreshKeysSelectedBtn.addEventListener('click', withLoading(refreshKeysSelectedBtn, refreshGoogleKeysForSelected));
-
-  const googleExpandCompounds = document.getElementById('google-expand-compounds');
-  if (googleExpandCompounds) {
-    googleExpandCompounds.addEventListener('change', () => {
-      refreshGoogleTargetOptions();
+  bindFileDelete('apple-files-list', 'apple-feedback');
+  bindFileDelete('google-files-list', 'google-feedback');
+  bindUpload('upload-accessories-form', 'accessories-file', '/api/upload/accessories', 'apple-feedback',
+    r => 'Uploaded ' + plural(r.saved.items, 'accessory') + ' (' + plural(r.tags_added, 'new tag') + ')' +
+      ((r.warnings || []).length ? ' | ' + r.warnings.join(' | ') : ''));
+  bindUpload('upload-secrets-form', 'secrets-file', '/api/upload/secrets', 'google-feedback',
+    r => (r.saved.replaced ? 'Replaced' : 'Uploaded') + ' secrets.json (' + plural(r.tags_added, 'tag') + ' added, ' +
+      plural(r.tags_removed, 'tag') + ' removed)',
+    () => {
+      const hasSecrets = document.querySelector('#google-files-list .file-row');
+      return !hasSecrets || window.confirm('Replace the current secrets.json? Google tags that are not in the new file are removed with their history.');
     });
-  }
-
-  // Google refresh keys button (Keys tab)
-  const refreshGoogleKeysBtn = document.getElementById('refresh-google-keys-btn');
-  if (refreshGoogleKeysBtn) {
-    refreshGoogleKeysBtn.addEventListener('click', withLoading(refreshGoogleKeysBtn, async () => {
-      try {
-        const data = await postJson('/api/google/refresh-keys', { force_upload: true });
-        const pruned = data.pruned || {};
-        const prunedCanonicIds = pruned.pruned_canonic_ids || 0;
-        const prunedCompounds = pruned.pruned_compounds || 0;
-        const prunedTargets = pruned.pruned_targets || 0;
-        let feedbackMsg = 'Google keys refreshed successfully at ' + new Date().toLocaleTimeString();
-        if (prunedCanonicIds > 0 || prunedCompounds > 0 || prunedTargets > 0) {
-          const parts = [];
-          if (prunedCanonicIds > 0) parts.push(prunedCanonicIds + ' stale canonic id' + (prunedCanonicIds !== 1 ? 's' : '') + ' removed');
-          if (prunedCompounds > 0) parts.push(prunedCompounds + ' stale compound' + (prunedCompounds !== 1 ? 's' : '') + ' removed');
-          if (prunedTargets > 0) parts.push(prunedTargets + ' stale target' + (prunedTargets !== 1 ? 's' : '') + ' removed');
-          feedbackMsg += ' | ' + parts.join(', ');
-        }
-        setGoogleFeedback(feedbackMsg);
-    
-        await refreshTags();
-        await refreshStatus();
-      } catch (err) {
-        setGoogleFeedback(String(err), true);
-    
-      }
-    }));
-  }
-
-  // File delete handlers (per section)
-  const appleFilesList = document.getElementById('apple-files-list');
-  if (appleFilesList) {
-    appleFilesList.addEventListener('click', async (evt) => {
-      const target = evt.target;
-      if (!(target instanceof HTMLElement) || !target.classList.contains('delete-btn')) return;
-      const filename = target.dataset.filename;
-      if (!filename) return;
-      if (!window.confirm('Delete ' + filename + '?')) return;
-      try {
-        await deleteKeyfile(filename);
-        setAppleFeedback('Deleted ' + filename);
-        await refreshFiles();
-        await refreshTags();
-        await refreshErrors();
-      } catch (err) {
-        setAppleFeedback(String(err), true);
-      }
-    });
-  }
-
-  const googleFilesList = document.getElementById('google-files-list');
-  if (googleFilesList) {
-    googleFilesList.addEventListener('click', async (evt) => {
-      const target = evt.target;
-      if (!(target instanceof HTMLElement) || !target.classList.contains('delete-btn')) return;
-      const filename = target.dataset.filename;
-      if (!filename) return;
-      if (!window.confirm('Delete ' + filename + '?')) return;
-      try {
-        await deleteKeyfile(filename);
-        setGoogleFeedback('Deleted ' + filename);
-        await refreshFiles();
-        await refreshTags();
-        await refreshErrors();
-        await listGoogleTargets(false);
-      } catch (err) {
-        setGoogleFeedback(String(err), true);
-      }
-    });
-  }
-
-  const accessoriesForm = document.getElementById('upload-accessories-form');
-  if (accessoriesForm) {
-    accessoriesForm.addEventListener('submit', async (evt) => {
-      evt.preventDefault();
-      const fileInput = document.getElementById('accessories-file');
-      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
-      if (!file) return;
-      try {
-        await postFile('/api/upload/accessories', file);
-        setAppleFeedback('Uploaded Apple accessories file');
-        await refreshFiles();
-        await refreshTags();
-      } catch (err) {
-        setAppleFeedback(String(err), true);
-      }
-    });
-  }
-
-  const secretsForm = document.getElementById('upload-secrets-form');
-  if (secretsForm) {
-    secretsForm.addEventListener('submit', async (evt) => {
-      evt.preventDefault();
-      const secretsBtn = document.getElementById('upload-secrets-btn');
-      if (secretsBtn && secretsBtn.disabled) {
-        setGoogleFeedback('Delete existing secrets.json before uploading a new one.', true);
-        return;
-      }
-      const fileInput = document.getElementById('secrets-file');
-      const file = fileInput && fileInput.files ? fileInput.files[0] : null;
-      if (!file) return;
-      try {
-        await postFile('/api/upload/secrets', file);
-        setGoogleFeedback('Uploaded Google secrets file');
-        await refreshFiles();
-        await refreshTags();
-        await listGoogleTargets(false);
-      } catch (err) {
-        setGoogleFeedback(String(err), true);
-      }
-    });
-  }
 
   initMap();
-  // Invalidate map size after layout settles (flexbox map container)
   setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+  initBuildDeviceModal();
 
   refreshFiles();
-  refreshTags();
-  refreshDevices();
+  refreshInventory().then(() => {
+    if (slider && inventory.max_retention_days) slider.max = String(inventory.max_retention_days);
+  });
   refreshStatus();
-  refreshErrors();
-  refreshCombinedHistory();
-  initBuildDeviceModal();
+  refreshAlerts();
+  refreshHistory();
 }
 
 if (document.readyState === 'loading') {
