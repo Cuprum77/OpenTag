@@ -1,8 +1,8 @@
 services:
   opentag-server:
     build: .
-    # restart: unless-stopped
-    restart: no
+    restart: unless-stopped
+    # restart: no
     container_name: opentag-server
     ports:
       - 8888:8080
