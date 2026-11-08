@@ -13,8 +13,8 @@ RUN pip install --upgrade pip
 RUN pip install -r /tmp/requirements.txt
 
 # OpenTagBridge Google fetch tooling is installed in an isolated venv.
-ENV GOOGLE_FETCH_SCRIPT_URL="https://raw.githubusercontent.com/diminDDL/OpenTagBridge/cee726bd3779ced233d5b3c496bcc188efc66872/portable_fetch_update.py"
-ENV GOOGLE_FETCH_REQUIREMENTS_URL="https://raw.githubusercontent.com/diminDDL/OpenTagBridge/cee726bd3779ced233d5b3c496bcc188efc66872/requirements.txt"
+ENV GOOGLE_FETCH_SCRIPT_URL="https://raw.githubusercontent.com/diminDDL/OpenTagBridge/eb91a6d2a535e0d59d0a8bf2e4c4b98db032b5ef/portable_fetch_update.py"
+ENV GOOGLE_FETCH_REQUIREMENTS_URL="https://raw.githubusercontent.com/diminDDL/OpenTagBridge/eb91a6d2a535e0d59d0a8bf2e4c4b98db032b5ef/requirements.txt"
 ENV OPENTAG_GOOGLE_FETCH_ROOT="/opt/opentagbridge"
 ENV OPENTAG_GOOGLE_FETCH_VENV="/opt/google-fetch-venv"
 ENV OPENTAG_GOOGLE_FETCH_SCRIPT="/opt/opentagbridge/portable_fetch_update.py"
