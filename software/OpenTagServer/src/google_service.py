@@ -181,6 +181,18 @@ def fetch_due(runtime, user_id, now):
     return now - float(db.kv_get(db.user_key(user_id, "last_google_fetch"), 0)) >= interval
 
 
+def fetch_schedule(runtime, user_id):
+    minutes = runtime.get("google_auto_query_interval_min", 60)
+    if not runtime.get("local_history", True):
+        minutes = 0
+    last = float(db.kv_get(db.user_key(user_id, "last_google_fetch"), 0))
+    return {
+        "interval_min": minutes,
+        "last_unix": int(last) if last else None,
+        "next_due_unix": int(last + minutes * 60) if minutes > 0 and last else None,
+    }
+
+
 def mark_fetch_queued(user_id):
     db.kv_set(db.user_key(user_id, "last_google_fetch"), time.time(), user_id)
 

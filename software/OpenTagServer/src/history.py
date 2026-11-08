@@ -37,14 +37,14 @@ def store_events(user_id, events):
     return added
 
 
-def get_events(user_id, days, limit=20000):
-    cutoff = int(time.time() - float(days) * 86400)
+def get_events(user_id, since, until=None, limit=20000):
+    """Events with since <= ts <= until (until=None: up to now), newest first."""
     rows = db.query(
         "SELECT e.ts, e.latitude, e.longitude, e.accuracy, e.status, e.part, "
         "t.stable_id, t.provider, t.name AS tag_name, t.device_id "
         "FROM events e JOIN tags t ON t.id = e.tag_id "
-        "WHERE e.user_id = ? AND e.ts >= ? ORDER BY e.ts DESC LIMIT ?",
-        (user_id, cutoff, int(limit)),
+        "WHERE e.user_id = ? AND e.ts >= ? AND e.ts <= ? ORDER BY e.ts DESC LIMIT ?",
+        (user_id, int(since), int(until if until is not None else 2**62), int(limit)),
     )
     return [{
         "provider": r["provider"], "tag": r["tag_name"], "tag_id": r["stable_id"], "device_id": r["device_id"],

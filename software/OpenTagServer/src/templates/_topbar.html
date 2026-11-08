@@ -1,0 +1,28 @@
+{#- Shared top bar. Set `page` ('dashboard', 'account', 'admin') before including. -#}
+<header class="topbar">
+  <div class="topbar-left">
+    <a class="brand" href="/" title="OpenTag Server"><span class="brand-mark" aria-hidden="true"><i class="fas fa-tag"></i></span><span class="brand-name">OpenTag</span></a>
+    {% if page == 'admin' %}
+    <nav class="tabs" aria-label="Sections">
+      <a class="tab-btn active" href="/admin" aria-current="page"><i class="fas fa-users" aria-hidden="true"></i><span>Users</span></a>
+    </nav>
+    {% else %}
+    <nav class="tabs" aria-label="Sections">
+      <a class="tab-btn{% if page == 'dashboard' %} active{% endif %}" href="/#overview" data-tab="overview">Overview</a>
+      <a class="tab-btn" href="/#keys" data-tab="keys">Keys</a>
+      <a class="tab-btn" href="/#devices" data-tab="devices">Devices</a>
+    </nav>
+    {% endif %}
+  </div>
+  <div class="topbar-right">
+    {% if page == 'admin' %}
+    <span class="user-link" title="Signed in as the admin"><i class="fas fa-user-circle" aria-hidden="true"></i><strong>{{ username }}</strong></span>
+    {% else %}
+    <a href="/account" class="user-link{% if page == 'account' %} active{% endif %}" title="Account settings"{% if page == 'account' %} aria-current="page"{% endif %}><i class="fas fa-user-circle" aria-hidden="true"></i><strong id="username">{{ username }}</strong></a>
+    {% endif %}
+    <button type="button" class="icon-btn theme-toggle-btn" title="Switch theme" aria-label="Switch theme"></button>
+    <form method="post" action="/auth/logout" class="signout-form">
+      <button type="submit" class="signout-btn" title="Sign out"><i class="fas fa-sign-out-alt" aria-hidden="true"></i><span>Sign out</span></button>
+    </form>
+  </div>
+</header>

@@ -28,18 +28,20 @@ def clean_error_message(error):
 # ── alerts ──
 
 def add_alert(user_id, provider, type_, message, target=""):
-    """Record a problem. Repeats of an active alert bump its counter instead of piling up."""
+    """Record a problem. Repeats (same provider, type and target) of an alert that is still
+    shown bump its counter and replace its message with the latest one instead of piling up."""
     message = clean_error_message(message)
     target = str(target or "")
     now = int(time.time())
     with db.transaction() as conn:
         row = conn.execute(
             "SELECT id FROM alerts WHERE user_id = ? AND dismissed_at IS NULL AND provider = ? AND type = ? "
-            "AND target = ? AND message = ?",
-            (user_id, provider, type_, target, message),
+            "AND target = ? ORDER BY last_at DESC LIMIT 1",
+            (user_id, provider, type_, target),
         ).fetchone()
         if row:
-            conn.execute("UPDATE alerts SET count = count + 1, last_at = ? WHERE id = ?", (now, row["id"]))
+            conn.execute("UPDATE alerts SET count = count + 1, last_at = ?, message = ? WHERE id = ?",
+                         (now, message, row["id"]))
         else:
             conn.execute(
                 "INSERT INTO alerts(user_id, provider, type, target, message, count, first_at, last_at) "

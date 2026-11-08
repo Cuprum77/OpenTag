@@ -3,220 +3,158 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>OpenTag Server Dashboard</title>
+  <title>OpenTag Server</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="/static/fontawesome/fontawesome.css">
   <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/common.js"></script>
 </head>
-<body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <nav class="inline-tabs">
-        <div class="tab-inner"><button class="tab-btn active" data-tab="overview">Overview</button></div>
-        <div class="tab-inner"><button class="tab-btn" data-tab="keys">Keys</button></div>
-        <div class="tab-inner"><button class="tab-btn" data-tab="devices">Devices</button></div>
-      </nav>
-      <h1>OpenTag Server</h1>
-    </div>
-    <div class="topbar-right">
-      <div class="topbar-divider"></div>
-      <a href="/account" class="user-link" title="Account settings"><i class="fas fa-user-circle" aria-hidden="true"></i><strong id="username">{{ username }}</strong></a>
-      <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>
-      <form method="post" action="/auth/logout" class="signout-form">
-        <button type="submit" class="signout-btn">Sign Out</button>
-      </form>
-    </div>
-  </header>
+<body class="app">
+  {% set page = 'dashboard' %}{% include "_topbar.html" %}
 
-  <main class="layout">
+  <main class="app-main">
     <!-- OVERVIEW TAB -->
     <section class="tab-content active" id="tab-overview">
       <div class="overview-grid">
         <div class="map-area">
-          <div id="map"></div>
+          <div class="map-wrap">
+            <div id="map"></div>
+            <div class="map-toolbar">
+              <div class="range-chips" id="range-chips" role="group" aria-label="Time range">
+                <button type="button" data-range="1">24h</button>
+                <button type="button" data-range="3">3d</button>
+                <button type="button" data-range="7">7d</button>
+                <button type="button" data-range="30">30d</button>
+                <button type="button" data-range="custom"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Custom</button>
+              </div>
+              <label class="map-toggle"><input type="checkbox" id="trails-toggle"> Trails</label>
+            </div>
+            <div class="range-custom map-floating" id="range-custom" hidden>
+              <label>From <input type="datetime-local" id="range-from"></label>
+              <label>To <input type="datetime-local" id="range-to"></label>
+              <label class="range-now"><input type="checkbox" id="range-now"> Now</label>
+            </div>
+            <div class="focus-badge map-floating" id="focus-badge" hidden></div>
+            <div class="map-note map-floating" id="map-note" hidden></div>
+          </div>
         </div>
 
-        <div class="sidebar">
-          <div class="card">
-            <h2>Devices</h2>
-            <div id="tags-container" class="tags-container">
-              <p class="hint">Devices will appear here after the first refresh.</p>
+        <div class="split-handle" id="split-handle" role="separator" aria-orientation="vertical" aria-label="Resize the side panel (double-click to reset)" title="Drag to resize · double-click to reset" tabindex="0"></div>
+
+        <div class="sidebar overview-sidebar" id="overview-sheet">
+          <button type="button" class="sheet-handle" id="sheet-handle" aria-label="Expand or collapse the panel" aria-expanded="false"><span></span></button>
+          <div class="health-strip">
+            <div id="health-items" class="health-items"></div>
+            <button type="button" id="alerts-btn" class="health-bell" title="Alerts"><i class="fas fa-bell" aria-hidden="true"></i></button>
+          </div>
+          <div id="health-panel" class="card health-panel" hidden></div>
+          <div id="alerts-panel" class="card alerts-panel" hidden>
+            <div class="panel-head">
+              <h2>Alerts</h2>
+              <div class="panel-head-actions">
+                <button type="button" id="clear-alerts-btn" class="small-btn" hidden>Dismiss all</button>
+                <button type="button" id="close-alerts-btn" class="icon-btn" title="Close"><i class="fas fa-times" aria-hidden="true"></i></button>
+              </div>
             </div>
+            <div id="alerts-list" class="alerts-list"></div>
           </div>
 
-          <div class="card">
-            <h2>History & Location Management</h2>
-
-            <label class="history-slider-label">
-              Time Range: <span id="history-days-value">7</span> days
-            </label>
-            <input type="range" id="history-days-slider" min="1" max="30" step="1" value="7">
-
-            <button type="button" id="reload-history">Reload History</button>
-
-            <label class="debug-toggle">
-              <input type="checkbox" id="connect-dots-toggle">
-              <span>Connect dots by timestamp</span>
-            </label>
-
-            <label class="debug-toggle">
-              <input type="checkbox" id="highlight-latest-toggle" checked>
-              <span>Highlight latest locations</span>
-            </label>
-          </div>
-
-          <div class="card">
-            <h2>Actions</h2>
-            <div id="jobs-container" class="jobs-container"></div>
-            <p id="google-targets-feedback" class="hint"></p>
-            <form id="google-fetch-form" onsubmit="return false;">
-              <label for="apple-accessory-select">Apple tags</label>
-              <select id="apple-accessory-select" multiple size="4"></select>
-              <label for="google-tag-select">Google tags</label>
-              <select id="google-tag-select" multiple size="5"></select>
-              <button type="button" id="fetch-selected-btn">Fetch All Selected</button>
-              <button type="button" id="refresh-keys-selected-btn">Sync with Google</button>
-            </form>
-          </div>
-
-          <div class="card">
-            <h2>Status</h2>
-            <div id="status-container" class="status-container">
-              <p class="hint">Status will appear here after the first refresh.</p>
+          <div id="device-panel" class="card device-panel">
+            <div class="panel-head">
+              <h2>Devices</h2>
+              <div class="panel-head-actions">
+                <button type="button" id="select-all-btn" class="small-btn">All</button>
+                <button type="button" id="select-none-btn" class="small-btn">None</button>
+              </div>
             </div>
+            <div id="device-list" class="device-list">
+              <p class="hint">Loading devices…</p>
+            </div>
+            <div class="action-bar">
+              <button type="button" id="refresh-selected-btn" class="primary-btn" disabled>Refresh</button>
+              <div class="popover-wrap" id="more-actions" hidden>
+                <button type="button" id="more-actions-btn" class="icon-btn more-btn" title="More actions"><i class="fas fa-ellipsis-h" aria-hidden="true"></i></button>
+                <div class="popover-menu up" id="more-actions-menu" hidden>
+                  <button type="button" id="menu-sync-google"><i class="fab fa-google" aria-hidden="true"></i> Sync with Google &amp; announce keys</button>
+                </div>
+              </div>
+            </div>
+            <p id="action-feedback" class="hint"></p>
           </div>
 
-          <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <h2 style="margin: 0;">Alerts</h2>
-              <button type="button" id="clear-alerts-btn" title="Dismiss all alerts" style="font-size: 12px; padding: 4px 10px;">Dismiss all</button>
-            </div>
-            <div id="errors-container" class="errors-container">
-              <p class="hint">No errors</p>
-            </div>
-          </div>
+          <div id="focus-panel" class="card focus-panel" hidden></div>
         </div>
       </div>
     </section>
 
     <!-- KEYS TAB -->
-    <section class="tab-content" id="tab-keys">
-      <div class="keys-layout">
-        <div class="card keys-section">
-          <h2>Apple Accessories</h2>
-          <div class="keys-actions">
-            <form id="upload-accessories-form" class="keys-upload-form">
-              <label>Upload accessories.json</label>
-              <input type="file" id="accessories-file" accept="application/json,.json" required>
-              <button type="submit">Upload</button>
-            </form>
+    <section class="tab-content page-scroll" id="tab-keys">
+      <div class="page">
+        <section class="card provider-card" id="apple-card" data-provider="apple">
+          <div class="provider-head">
+            <span class="provider-logo apple" aria-hidden="true"><i class="fab fa-apple"></i></span>
+            <div class="provider-title">
+              <h2>Apple <button type="button" class="icon-btn info-btn" data-info="apple-info" aria-expanded="false" aria-controls="apple-info" title="About Apple tags" aria-label="About Apple tags"><i class="fas fa-info-circle" aria-hidden="true"></i></button></h2>
+              <div class="provider-sub" id="apple-schedule"></div>
+            </div>
+            <div class="provider-actions">
+              <button type="button" class="primary-btn" id="apple-upload-btn"><i class="fas fa-file-upload" aria-hidden="true"></i> Add accessories.json</button>
+              <input type="file" id="accessories-file" accept="application/json,.json" hidden>
+            </div>
           </div>
-          <p id="apple-feedback" class="hint"></p>
-          <div id="apple-accessories-list" class="key-list scrollable"></div>
-          <div class="keys-section-divider">
-            <span>Source files</span>
+          <div class="info-box" id="apple-info" hidden>
+            <p>Apple tags are read from an <code>accessories.json</code> that holds their keys. If you don't have one yet, <a href="https://github.com/dchristl/macless-haystack" target="_blank" rel="noopener noreferrer">Macless Haystack <i class="fas fa-external-link-alt" aria-hidden="true"></i></a> is a good place to start. Each file adds its tags; you can also drop it onto this card.</p>
           </div>
-          <div id="apple-files-list" class="file-list"></div>
-        </div>
+          <p id="apple-feedback" class="feedback" role="status"></p>
+          <div id="apple-accessories-list" class="tag-table"></div>
+          <div id="apple-files-list" class="source-files"></div>
+          <div class="drop-overlay" aria-hidden="true"><i class="fas fa-file-upload"></i> Drop accessories.json to add it</div>
+        </section>
 
-        <div class="card keys-section">
-          <h2>Google Secrets</h2>
-          <div class="keys-actions">
-            <form id="upload-secrets-form" class="keys-upload-form">
-              <label>Upload secrets.json</label>
-              <input type="file" id="secrets-file" accept="application/json,.json" required>
-              <button type="submit" id="upload-secrets-btn">Upload</button>
-            </form>
-            <button type="button" id="refresh-google-keys-btn" class="keys-secondary-btn" title="Lists your trackers on Google, removes ones Google no longer has, and announces upcoming keys so Google can locate them.">Sync with Google &amp; announce keys</button>
+        <section class="card provider-card" id="google-card" data-provider="google">
+          <div class="provider-head">
+            <span class="provider-logo google" aria-hidden="true"><i class="fab fa-google"></i></span>
+            <div class="provider-title">
+              <h2>Google <button type="button" class="icon-btn info-btn" data-info="google-info" aria-expanded="false" aria-controls="google-info" title="About Google tags" aria-label="About Google tags"><i class="fas fa-info-circle" aria-hidden="true"></i></button></h2>
+              <div class="provider-sub" id="google-schedule"></div>
+            </div>
+            <div class="provider-actions">
+              <button type="button" id="refresh-google-keys-btn"><i class="fas fa-sync-alt" aria-hidden="true"></i> Sync with Google</button>
+              <button type="button" class="primary-btn" id="google-upload-btn"><i class="fas fa-file-upload" aria-hidden="true"></i> <span id="google-upload-label">Upload secrets.json</span></button>
+              <input type="file" id="secrets-file" accept="application/json,.json" hidden>
+            </div>
           </div>
-          <p id="google-upload-hint" class="hint"></p>
-          <p id="google-feedback" class="hint"></p>
-          <div id="google-targets-list" class="key-list scrollable"></div>
-          <div class="keys-section-divider">
-            <span>Auth file</span>
+          <div class="info-box" id="google-info" hidden>
+            <p>Google tags come from the <code>secrets.json</code> of your Google account, made with <a href="https://github.com/diminDDL/OpenTagBridge" target="_blank" rel="noopener noreferrer">OpenTag Bridge <i class="fas fa-external-link-alt" aria-hidden="true"></i></a>, which is also where new trackers are set up.</p>
+            <p><strong>Sync with Google</strong> refreshes your tracker list and announces upcoming keys so Google can find them. It also runs on its own.</p>
           </div>
-          <div id="google-files-list" class="file-list"></div>
-        </div>
+          <p id="google-feedback" class="feedback" role="status"></p>
+          <div id="google-targets-list" class="tag-table"></div>
+          <div id="google-files-list" class="source-files"></div>
+          <div class="drop-overlay" aria-hidden="true"><i class="fas fa-file-upload"></i> Drop secrets.json to upload it</div>
+        </section>
       </div>
     </section>
 
     <!-- DEVICES TAB -->
-    <section class="tab-content" id="tab-devices">
-      <div class="devices-layout">
-        <div class="card devices-panel">
-          <h2>Tags</h2>
-          <p class="hint">Tick the tags that belong to one physical thing (for example the Apple and Google halves of a tag) and create a device from them. Tags that are not part of a device are tracked on their own.</p>
-          <div id="devices-tag-list" class="devices-tag-list"></div>
-          <button type="button" id="build-device-btn" class="device-action-btn">+ Create Device</button>
-        </div>
-
-        <div class="card devices-panel">
-          <h2>Devices</h2>
-          <div id="devices-container" class="devices-container">
-            <p class="hint">No devices yet.</p>
+    <section class="tab-content page-scroll" id="tab-devices">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h2>Devices</h2>
+            <p class="hint">Group tags that belong to one thing, like the Apple and Google halves of a tag, so they show up as one device on the map.</p>
           </div>
+          <button type="button" id="new-device-btn" class="primary-btn"><i class="fas fa-plus" aria-hidden="true"></i> New device</button>
         </div>
+        <div id="device-suggestions" class="suggestions"></div>
+        <p id="devices-feedback" class="feedback" role="status"></p>
+        <div id="devices-container" class="device-grid"></div>
+        <h3 class="section-title" id="ungrouped-title">Ungrouped tags</h3>
+        <div id="ungrouped-list" class="card list-card"></div>
       </div>
     </section>
 
   </main>
-
-  <!-- BUILD DEVICE MODAL -->
-  <div id="build-device-modal" class="modal-overlay" style="display:none">
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h2 id="device-modal-title">Create Device</h2>
-        <button type="button" id="modal-close-btn" class="modal-close-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="modal-section">
-          <label>Device name</label>
-          <input type="text" id="device-name-input" placeholder="e.g. My Key, Commute Tracker" autocomplete="off">
-        </div>
-        <div class="modal-section">
-          <label>Color</label>
-          <div id="device-color-picker" class="color-picker">
-            <span class="color-swatch active" data-color="#4caf50" style="background:#4caf50"></span>
-            <span class="color-swatch" data-color="#1f78ff" style="background:#1f78ff"></span>
-            <span class="color-swatch" data-color="#e53935" style="background:#e53935"></span>
-            <span class="color-swatch" data-color="#ff9800" style="background:#ff9800"></span>
-            <span class="color-swatch" data-color="#9c27b0" style="background:#9c27b0"></span>
-            <span class="color-swatch" data-color="#00bcd4" style="background:#00bcd4"></span>
-            <span class="color-swatch" data-color="#795548" style="background:#795548"></span>
-            <span class="color-swatch" data-color="#607d8b" style="background:#607d8b"></span>
-            <input type="color" id="device-custom-color" class="custom-color-input" title="Pick custom color" value="#4caf50">
-          </div>
-        </div>
-        <div class="modal-section">
-          <label>Icon</label>
-          <div id="device-icon-picker" class="icon-picker"></div>
-        </div>
-        <div class="modal-section">
-          <label id="device-tags-label">Selected tags: 0</label>
-          <div id="device-tag-checklist" class="tag-checklist"></div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="modal-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
-        <button type="button" id="modal-create-btn" class="modal-btn modal-btn-create" disabled>Create Device</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- CONFIRM MODAL -->
-  <div id="confirm-modal" class="modal-overlay" style="display:none">
-    <div class="modal-dialog">
-      <div class="modal-header">
-        <h2 id="confirm-modal-title">Are you sure?</h2>
-        <button type="button" id="confirm-close-btn" class="modal-close-btn">&times;</button>
-      </div>
-      <div id="confirm-modal-body" class="modal-body"></div>
-      <div class="modal-footer">
-        <button type="button" id="confirm-cancel-btn" class="modal-btn modal-btn-cancel">Cancel</button>
-        <button type="button" id="confirm-ok-btn" class="modal-btn modal-btn-danger">Delete</button>
-      </div>
-    </div>
-  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="/static/dashboard.js"></script>

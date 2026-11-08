@@ -1,5 +1,6 @@
 """Data API for regular users (the admin account has no access to any of this)."""
 import logging
+import time
 
 from flask import Blueprint, current_app, g, jsonify, request, send_file
 
@@ -257,12 +258,21 @@ def jobs_get(job_id):
 @api_bp.get("/history")
 @user_required
 def history_get():
+    """?from=<unix>&to=<unix> (to omitted = now), or the older ?days=N."""
     try:
-        days = max(0.01, min(36500.0, float(request.args.get("days", 7))))
         limit = max(1, min(100000, int(request.args.get("limit", 20000))))
+        if request.args.get("from"):
+            since = int(float(request.args["from"]))
+            until = int(float(request.args["to"])) if request.args.get("to") else None
+        else:
+            days = max(0.01, min(36500.0, float(request.args.get("days", 7))))
+            since, until = int(time.time() - days * 86400), None
     except ValueError:
-        return _error("days and limit must be numbers")
-    return jsonify({"events": history.get_events(_uid(), days, limit)})
+        return _error("from, to, days and limit must be numbers")
+    if until is not None and until < since:
+        return _error("the end of the range is before its start")
+    events = history.get_events(_uid(), since, until, limit)
+    return jsonify({"events": events, "truncated": len(events) >= limit})
 
 
 @api_bp.get("/status")
@@ -271,6 +281,8 @@ def status_get():
     status = {name: state.get_status(_uid(), name) for name in ("apple", "apple_singleton", "google", "google_keys")}
     status["gap_recovery"] = apple_service.sweep_status(_runtime(), _uid())
     status["google_keys_schedule"] = google_service.key_sync_status(_runtime(), _uid())
+    status["apple_schedule"] = apple_service.fetch_schedule(_runtime(), _uid())
+    status["google_schedule"] = google_service.fetch_schedule(_runtime(), _uid())
     return jsonify(status)
 
 

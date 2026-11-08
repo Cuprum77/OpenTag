@@ -4,42 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>OpenTag Users</title>
+  <link rel="stylesheet" href="/static/fontawesome/fontawesome.css">
   <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/common.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <h1>OpenTag Server · Users</h1>
-    </div>
-    <div class="topbar-right">
-      <div class="topbar-divider"></div>
-      <div class="user">Admin <strong>{{ username }}</strong></div>
-      <button type="button" id="theme-toggle" class="theme-toggle-btn" title="Toggle dark mode">🌙</button>
-      <form method="post" action="/auth/logout" class="signout-form">
-        <button type="submit" class="signout-btn">Sign Out</button>
-      </form>
-    </div>
-  </header>
+  {% set page = 'admin' %}{% include "_topbar.html" %}
 
-  <main class="layout simple-page">
-    <section class="card">
-      <h2>Create user</h2>
-      <p class="hint">Each user has their own keys, devices and history. The admin account can manage accounts but cannot see any of that.</p>
-      <form id="create-user-form" class="stack-form" autocomplete="off">
-        <label for="new-username">Username</label>
-        <input id="new-username" required pattern="[A-Za-z0-9_\-]{1,64}" title="Letters, digits, _ and -">
-        <label for="new-password">Password (min. 8 characters)</label>
-        <input id="new-password" type="password" minlength="8" required autocomplete="new-password">
-        <button type="submit">Create user</button>
-      </form>
-      <p id="admin-feedback" class="hint"></p>
-    </section>
-
-    <section class="card">
-      <h2>Users</h2>
-      <div id="users-list" class="file-list"><p class="hint">Loading…</p></div>
-      <p class="hint">The admin password is set in <code>config.toml</code>.</p>
-    </section>
+  <main class="page-scroll">
+    <div class="page">
+      <section class="card">
+        <div class="panel-head">
+          <h2>Users</h2>
+          <button type="button" id="new-user-btn" class="primary-btn"><i class="fas fa-user-plus" aria-hidden="true"></i> New user</button>
+        </div>
+        <p class="hint">Each user has their own keys, devices and location history. As the admin you can manage accounts, but you can't see any of their data.</p>
+        <p id="admin-feedback" class="feedback" role="status"></p>
+        <div id="users-list" class="table-wrap"><p class="hint">Loading…</p></div>
+        <p class="hint">The admin password is set in <code>config.toml</code>.</p>
+      </section>
+    </div>
   </main>
 
   <script src="/static/admin.js"></script>

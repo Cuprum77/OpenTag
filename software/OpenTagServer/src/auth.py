@@ -79,7 +79,13 @@ def get_user(username):
 
 
 def list_users():
-    return db.query("SELECT id, username, role, created_at FROM users ORDER BY role, username")
+    """Users with their number of signed-in sessions."""
+    return db.query(
+        "SELECT u.id, u.username, u.role, u.created_at, "
+        "(SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at >= ?) AS sessions "
+        "FROM users u ORDER BY u.role, u.username",
+        (int(time.time()),),
+    )
 
 
 def create_user(username, password):
@@ -140,6 +146,21 @@ def read_session(token):
 
 def clear_session(token):
     db.execute("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
+
+
+def count_sessions(user_id):
+    row = db.query_one("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND expires_at >= ?", (user_id, int(time.time())))
+    return row["n"]
+
+
+def revoke_sessions(user_id, keep_token=None):
+    """Sign a user out everywhere (except the session `keep_token`, if given). Returns how many ended."""
+    with db.transaction() as conn:
+        if keep_token:
+            cur = conn.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, _token_hash(keep_token)))
+        else:
+            cur = conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        return cur.rowcount
 
 
 def purge_expired_sessions():
@@ -276,3 +297,18 @@ def change_password():
         secure=current_app.config.get("SESSION_COOKIE_SECURE", False), samesite="Lax",
     )
     return response
+
+
+@auth_bp.get("/sessions")
+@login_required
+def sessions_info():
+    return jsonify({"sessions": count_sessions(g.user["id"])})
+
+
+@auth_bp.post("/sessions/revoke-others")
+@login_required
+def sessions_revoke_others():
+    """Sign out every other browser of the current user; this one stays signed in."""
+    ended = revoke_sessions(g.user["id"], keep_token=g.user["session_token"])
+    logger.info("%s signed out %d other session(s)", g.user["username"], ended)
+    return jsonify({"ok": True, "ended": ended})

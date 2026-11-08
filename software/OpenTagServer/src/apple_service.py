@@ -82,6 +82,16 @@ def auto_fetch_due(runtime, user_id, now=None):
     return (now or time.time()) - float(db.kv_get(db.user_key(user_id, "last_apple_fetch"), 0)) >= interval
 
 
+def fetch_schedule(runtime, user_id):
+    minutes = runtime.get("apple_auto_query_interval_min", 0)
+    last = float(db.kv_get(db.user_key(user_id, "last_apple_fetch"), 0))
+    return {
+        "interval_min": minutes,
+        "last_unix": int(last) if last else None,
+        "next_due_unix": int(last + minutes * 60) if minutes > 0 and last else None,
+    }
+
+
 def mark_auto_fetch_queued(user_id):
     db.kv_set(db.user_key(user_id, "last_apple_fetch"), time.time(), user_id)
 
@@ -160,7 +170,7 @@ def sweep_status(runtime, user_id):
         return {"enabled": False}
     sweep = db.kv_get(_sweep_key(user_id), {}) or {}
     pending = len(sweep.get("pending") or [])
-    total = sweep.get("total") or 0
+    total = max(sweep.get("total") or 0, pending)  # older saved state had no total
     return {
         "enabled": True,
         "running": pending > 0,

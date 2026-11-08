@@ -24,7 +24,8 @@ def _user_row(user_id):
 @auth.admin_required
 def users_list():
     return jsonify({"users": [
-        {"id": r["id"], "username": r["username"], "role": r["role"], "created_unix": r["created_at"]}
+        {"id": r["id"], "username": r["username"], "role": r["role"], "created_unix": r["created_at"],
+         "sessions": r["sessions"], "self": r["id"] == g.user["id"]}
         for r in auth.list_users()
     ]})
 
@@ -55,6 +56,17 @@ def users_reset_password(user_id):
         return jsonify({"error": str(exc)}), 400
     logger.info("Admin %s reset the password of %s", g.user["username"], row["username"])
     return jsonify({"ok": True})
+
+
+@admin_bp.post("/users/<int:user_id>/sessions/revoke")
+@auth.admin_required
+def users_revoke_sessions(user_id):
+    row = _user_row(user_id)
+    if not row:
+        return jsonify({"error": "user not found"}), 404
+    ended = auth.revoke_sessions(user_id)
+    logger.info("Admin %s signed out %s everywhere (%d session(s))", g.user["username"], row["username"], ended)
+    return jsonify({"ok": True, "ended": ended})
 
 
 @admin_bp.delete("/users/<int:user_id>")
