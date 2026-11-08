@@ -1515,6 +1515,7 @@ body.resizing #map { pointer-events: none; }
 
 /* ═════════════ Admin / account ═════════════ */
 .table-wrap { overflow-x: auto; margin-bottom: 10px; }
+.users-list { margin-bottom: 10px; }
 
 .data-table { width: 100%; border-collapse: collapse; }
 
