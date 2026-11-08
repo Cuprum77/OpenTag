@@ -102,6 +102,29 @@ MIGRATIONS = [
     """
     ALTER TABLE devices ADD COLUMN icon TEXT
     """,
+    # 3: background jobs (manual + automatic fetches/syncs) with progress
+    """
+    CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        priority INTEGER NOT NULL,
+        params TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL,
+        stage TEXT NOT NULL DEFAULT '',
+        progress INTEGER NOT NULL DEFAULT 0,
+        total INTEGER NOT NULL DEFAULT 0,
+        result TEXT,
+        error TEXT,
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        finished_at INTEGER
+    );
+    CREATE INDEX jobs_queue ON jobs(state, provider, priority, id);
+    CREATE INDEX jobs_user ON jobs(user_id, id)
+    """,
 ]
 
 

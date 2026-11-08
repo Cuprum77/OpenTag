@@ -42,6 +42,14 @@ def _admin_from_doc(doc):
     return None
 
 
+# Settings that became fixed defaults (see apple_service / apple_requests / google_service).
+RETIRED_KEYS = (
+    "apple_error_backoff_seconds", "apple_manual_wait_timeout_seconds", "google_refresh_settle_seconds",
+    "apple_singleton_sweep_interval_hours", "apple_singleton_interval_seconds", "apple_bulk_batch_size",
+    "apple_query_days",
+)
+
+
 def load_runtime_config():
     data_dir = Path(os.environ.get("OPENTAG_DATA_DIR", str(DEFAULT_DATA_DIR)))
     config_path = Path(os.environ.get("OPENTAG_CONFIG", str(data_dir / "config.toml")))
@@ -66,22 +74,21 @@ def load_runtime_config():
             "endpoint": cfg.get("haystack_endpoint", ""),
             "login": cfg.get("haystack_login", ""),
             "password": cfg.get("haystack_password", ""),
+            # Spacing between automatic Haystack requests (bulk batches and gap recovery).
             "request_interval_seconds": max(1, _to_int(cfg.get("apple_request_interval_seconds", 60), 60)),
-            "error_backoff_seconds": max(1, _to_int(cfg.get("apple_error_backoff_seconds", 300), 300)),
         },
         "local_history": _to_bool(cfg.get("local_history", True), default=True),
         "google_auto_query_interval_min": _to_int(cfg.get("google_auto_query_interval_min", 60), default=60),
         "apple_auto_query_interval_min": _to_int(cfg.get("apple_auto_query_interval_min", 600), default=600),
-        "apple_manual_wait_timeout_seconds": max(1, min(180, _to_int(cfg.get("apple_manual_wait_timeout_seconds", 180), 180))),
-        "google_refresh_settle_seconds": max(0, _to_int(cfg.get("google_refresh_settle_seconds", 15), 15)),
-        "apple_singleton_sweep_enabled": _to_bool(cfg.get("apple_singleton_sweep_enabled", True), True),
-        "apple_singleton_sweep_interval_hours": max(0, _to_int(cfg.get("apple_singleton_sweep_interval_hours", 24), 24)),
-        "apple_singleton_interval_seconds": max(1, _to_int(cfg.get("apple_singleton_interval_seconds", 60), 60)),
-        "apple_bulk_batch_size": max(1, _to_int(cfg.get("apple_bulk_batch_size", 200), 200)),
-        "apple_query_days": max(1, _to_int(cfg.get("apple_query_days", 7), 7)),
+        # Gap recovery: query every Apple key on its own, one request at a time (old name accepted).
+        "apple_gap_recovery": _to_bool(cfg.get("apple_gap_recovery", cfg.get("apple_singleton_sweep_enabled", True)), True),
         "google_key_refresh_interval_hours": _to_int(cfg.get("google_key_refresh_interval_hours", 24), default=24),
         # Global maximum; devices may choose a shorter retention in the UI. 0 = unlimited.
         "history_retention_days": max(0, _to_int(cfg.get("history_retention_days", 30), default=30)),
         "log_level": os.environ.get("OPENTAG_LOG_LEVEL", cfg.get("log_level", "INFO")).upper(),
     }
+    retired = [key for key in RETIRED_KEYS if key in cfg]
+    if retired:
+        # Logged before logging is configured, hence warning (shown by Python's fallback handler).
+        logger.warning("config: these settings are no longer used and can be removed: %s", ", ".join(retired))
     return runtime

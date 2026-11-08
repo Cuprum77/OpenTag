@@ -1,4 +1,4 @@
-"""Google operations shared by the API and the background worker."""
+"""Google work run as scheduler jobs (at most one per user at a time)."""
 import logging
 import time
 
@@ -12,36 +12,34 @@ from fetch_google import fetch_google_locations, refresh_google_announcements, u
 
 logger = logging.getLogger(__name__)
 
-MANUAL_LOCK_WAIT_SECONDS = 600
+LOCK_WAIT_SECONDS = 600
+SETTLE_AFTER_SYNC_SECONDS = 15  # let Google process new announcements before fetching
+FETCH_TIMEOUT_SECONDS = 45      # per tracker: wait for the FCM location answer
 
 
-class GoogleBusy(RuntimeError):
-    pass
+def _short(name):
+    return name.replace("[OTB-C] ", "")
 
 
-def _fetch_tag_payloads(secrets_path, tag, timeout):
-    """Compound trackers with bridge metadata are fetched in one call; anything else
-    (plain trackers, compound pieces without metadata) per canonic id."""
-    if tag.get("compound_name"):
-        return [fetch_google_locations(secrets_path, compound_name=tag["compound_name"], timeout=timeout)]
-    if not tag["canonic_ids"]:
-        raise RuntimeError(f"{tag['name']} has no known Google ids yet; sync with Google first")
-    return [fetch_google_locations(secrets_path, canonic_id=cid, timeout=timeout) for cid in tag["canonic_ids"]]
+def _locked(username):
+    lock = user_lock(username)
+    if not lock.acquire(timeout=LOCK_WAIT_SECONDS):
+        raise RuntimeError("another Google operation is still running for this account")
+    return lock
 
 
-def fetch_tags(user, stable_ids=None, manual=False, timeout=45):
+def fetch_tags(user, stable_ids=None, manual=False, progress=None):
     """Fetch Google locations for some (or all) Google tags of a user and store them.
 
-    Returns {"stored": n, "fetched": [...], "failed": [{"tag", "error"}]}.
-    Failures are recorded as alerts; a failing tag does not stop the others.
+    Returns (state, result) with result = {"stored", "fetched": [...], "failed": [{"tag", "subtag", "error"}]}.
+    A failing tag or subtag becomes an alert and does not stop the others.
     """
+    progress = progress or (lambda **_: None)
     user_id, username = user["id"], user["username"]
     path = keystore.secrets_path(username)
     if not path:
         raise ValueError("upload secrets.json first")
-    lock = user_lock(username)
-    if not lock.acquire(timeout=MANUAL_LOCK_WAIT_SECONDS if manual else 0):
-        raise GoogleBusy("another Google operation is still running for this account")
+    lock = _locked(username)
     try:
         inventory.sync_user(user_id, username)
         index = keystore.get_index(username)
@@ -49,45 +47,94 @@ def fetch_tags(user, stable_ids=None, manual=False, timeout=45):
         if stable_ids is not None and len(tags) != len(set(stable_ids)):
             raise ValueError("unknown Google tag")
         kind = "fetch_location" if manual else "auto_fetch_location"
+        alert_type = "manual_fetch_error" if manual else "auto_fetch_error"
+
+        def steps(tag):
+            return len(tag["subtags"]) if tag.get("compound_name") else len(tag["canonic_ids"])
+
+        total = sum(max(1, steps(t)) for t in tags)
+        done = 0
+        progress(total=total, progress=0, stage=f"Fetching {len(tags)} Google tag(s)")
         result = {"stored": 0, "fetched": [], "failed": []}
+
         for tag in tags:
+            tag_done_before = done
+            seen = {"steps": 0}
+
+            def on_progress(event, tag=tag):
+                nonlocal done
+                name = _short(event.get("name") or tag["name"])
+                if event.get("event") == "start":
+                    progress(stage=f"{tag['name']}: fetching {name}")
+                elif event.get("event") in ("done", "failed"):
+                    seen["steps"] += 1
+                    done = tag_done_before + seen["steps"]
+                    progress(progress=done)
+
             try:
+                payloads = []
+                if tag.get("compound_name"):
+                    payloads.append(fetch_google_locations(
+                        path, compound_name=tag["compound_name"], timeout=FETCH_TIMEOUT_SECONDS,
+                        subtags=steps(tag), on_progress=on_progress))
+                elif tag["canonic_ids"]:
+                    for cid in tag["canonic_ids"]:
+                        payloads.append(fetch_google_locations(
+                            path, canonic_id=cid, timeout=FETCH_TIMEOUT_SECONDS, on_progress=on_progress))
+                else:
+                    raise RuntimeError(f"{tag['name']} has no known Google ids yet; sync with Google first")
                 events = []
-                for payload in _fetch_tag_payloads(path, tag, timeout):
+                for payload in payloads:
                     events.extend(history.google_events(payload, keystore.get_index(username)))
+                    for failure in payload.get("failures") or []:
+                        subtag = _short(failure.get("name") or failure.get("canonic_id") or "?")
+                        error = state.clean_error_message(failure.get("error") or "failed")
+                        result["failed"].append({"tag": tag["name"], "subtag": subtag, "error": error})
+                        state.add_alert(user_id, "google", alert_type, error, target=f"{tag['name']} / {subtag}")
                 result["stored"] += history.store_events(user_id, events)
                 result["fetched"].append(tag["name"])
             except Exception as exc:
-                logger.warning("Google fetch failed for %s / %s: %s", username, tag["name"], state.clean_error_message(exc))
-                result["failed"].append({"tag": tag["name"], "error": state.clean_error_message(exc)})
-                state.add_alert(user_id, "google", "manual_fetch_error" if manual else "auto_fetch_error", exc, target=tag["name"])
+                error = state.clean_error_message(exc)
+                logger.warning("Google fetch failed for %s / %s: %s", username, tag["name"], error)
+                result["failed"].append({"tag": tag["name"], "subtag": None, "error": error})
+                state.add_alert(user_id, "google", alert_type, error, target=tag["name"])
+            done = tag_done_before + max(1, steps(tag))
+            progress(progress=done)
+
         if result["failed"]:
             first = result["failed"][0]
-            state.set_status(user_id, "google", False, kind, error=f"{first['tag']}: {first['error']}", details=result)
+            where = first["tag"] + (f" / {first['subtag']}" if first["subtag"] else "")
+            state.set_status(user_id, "google", False, kind, error=f"{where}: {first['error']}", details=result)
         else:
             state.set_status(user_id, "google", True, kind, details=result)
-        logger.info("Google %s for %s: %d tags, %d new events, %d failed",
+        logger.info("Google %s for %s: %d tags, %d new events, %d failures",
                     kind, username, len(result["fetched"]), result["stored"], len(result["failed"]))
-        return result
+        if result["failed"] and not result["fetched"]:
+            job_state = "failed"
+        elif result["failed"]:
+            job_state = "partial"
+        else:
+            job_state = "done"
+        return job_state, result
     finally:
         lock.release()
 
 
-def sync_with_google(user, manual=False):
+def sync_with_google(user, manual=False, progress=None):
     """List devices on Google (updating the canonic-id cache) and announce upcoming keys.
 
     Manual syncs always upload and prune trackers Google no longer reports (their tags
     and history are deleted). Automatic syncs let the bridge skip recent uploads.
     """
+    progress = progress or (lambda **_: None)
     user_id, username = user["id"], user["username"]
     path = keystore.secrets_path(username)
     if not path:
         raise ValueError("upload secrets.json first")
-    lock = user_lock(username)
-    if not lock.acquire(timeout=MANUAL_LOCK_WAIT_SECONDS if manual else 0):
-        raise GoogleBusy("another Google operation is still running for this account")
+    lock = _locked(username)
     kind = "sync_keys" if manual else "auto_sync_keys"
     try:
+        progress(stage="Listing trackers and announcing keys", total=1)
         before = keystore.capture_canonic_state(path) if manual else None
         payload = refresh_google_announcements(path, force_upload=manual)
         pruned = {"pruned_canonic_ids": 0, "pruned_compounds": 0}
@@ -99,73 +146,50 @@ def sync_with_google(user, manual=False):
         details.update(pruned)
         details["tags_added"] = len(sync["added"])
         details["tags_removed"] = len(sync["removed"])
-        db.kv_set(db.user_key(user_id, "last_google_key_refresh"), time.time(), user_id)
-        return state.set_status(user_id, "google_keys", True, kind, details=details)
+        now = time.time()
+        db.kv_set(db.user_key(user_id, "last_google_key_refresh"), now, user_id)
+        db.kv_set(db.user_key(user_id, "google_fetch_not_before"), now + SETTLE_AFTER_SYNC_SECONDS, user_id)
+        progress(progress=1)
+        status = state.set_status(user_id, "google_keys", True, kind, details=details)
+        return "done", status["details"]
     except Exception as exc:
         state.set_status(user_id, "google_keys", False, kind, error=exc)
         state.add_alert(user_id, "google", "key_sync_error", exc, target="announcements")
+        db.kv_set(db.user_key(user_id, "google_refresh_retry_after"), time.time() + 300, user_id)
         raise
     finally:
         lock.release()
 
 
-def run_google_user(runtime, user):
-    """One scheduler tick for a user: key announcement first, then location fetch."""
-    user_id, username = user["id"], user["username"]
-    if not keystore.secrets_path(username):
-        return
-    now = time.time()
+# ── automatic scheduling ──
 
-    def key(name):
-        return db.user_key(user_id, name)
-
-    refresh_hours = runtime.get("google_key_refresh_interval_hours", 24)
-    if refresh_hours > 0:
-        last_refresh = float(db.kv_get(key("last_google_key_refresh"), 0))
-        retry_after = float(db.kv_get(key("google_refresh_retry_after"), 0))
-        if now - last_refresh > refresh_hours * 3600:
-            if now < retry_after:
-                return
-            logger.info("Auto-syncing Google keys for %s (last %.0f h ago)", username, (now - last_refresh) / 3600)
-            try:
-                sync_with_google(user, manual=False)
-                db.kv_set(key("google_fetch_not_before"), time.time() + runtime.get("google_refresh_settle_seconds", 15), user_id)
-            except GoogleBusy:
-                return
-            except Exception as exc:
-                logger.error("Google key sync failed for %s: %s", username, state.clean_error_message(exc))
-                db.kv_set(key("google_refresh_retry_after"), time.time() + 300, user_id)
-                return
-
-    if time.time() < float(db.kv_get(key("google_fetch_not_before"), 0)):
-        return
-    interval_min = runtime.get("google_auto_query_interval_min", 60)
-    if not runtime.get("local_history", True) or interval_min <= 0:
-        return
-    if now - float(db.kv_get(key("last_google_fetch"), 0)) <= interval_min * 60:
-        return
-    if not keystore.get_index(username)["google"]:
-        return
-    logger.info("Auto-fetching Google locations for %s", username)
-    try:
-        fetch_tags(user, manual=False)
-    except GoogleBusy:
-        return
-    except Exception as exc:
-        state.add_alert(user_id, "google", "worker_error", exc, target="google_auto_fetch")
-    db.kv_set(key("last_google_fetch"), now, user_id)
+def key_sync_due(runtime, user_id, now):
+    hours = runtime.get("google_key_refresh_interval_hours", 24)
+    if hours <= 0:
+        return False
+    last = float(db.kv_get(db.user_key(user_id, "last_google_key_refresh"), 0))
+    retry_after = float(db.kv_get(db.user_key(user_id, "google_refresh_retry_after"), 0))
+    return now - last > hours * 3600 and now >= retry_after
 
 
-def google_auto_loop(app, stop_event):
-    logger.info("Google worker started")
-    while not stop_event.is_set():
-        try:
-            runtime = app.config["OPENTAG"]
-            for user in db.query("SELECT id, username FROM users WHERE role = 'user'"):
-                try:
-                    run_google_user(runtime, user)
-                except Exception as exc:
-                    logger.error("Google worker error for %s: %s", user["username"], exc)
-        except Exception as exc:
-            logger.error("Google worker loop error: %s", exc)
-        stop_event.wait(15)
+def fetch_due(runtime, user_id, now):
+    interval = runtime.get("google_auto_query_interval_min", 60) * 60
+    if interval <= 0 or not runtime.get("local_history", True):
+        return False
+    if now < float(db.kv_get(db.user_key(user_id, "google_fetch_not_before"), 0)):
+        return False
+    return now - float(db.kv_get(db.user_key(user_id, "last_google_fetch"), 0)) >= interval
+
+
+def mark_fetch_queued(user_id):
+    db.kv_set(db.user_key(user_id, "last_google_fetch"), time.time(), user_id)
+
+
+def key_sync_status(runtime, user_id):
+    hours = runtime.get("google_key_refresh_interval_hours", 24)
+    last = float(db.kv_get(db.user_key(user_id, "last_google_key_refresh"), 0))
+    return {
+        "interval_hours": hours,
+        "last_unix": int(last) if last else None,
+        "next_due_unix": int(last + hours * 3600) if hours > 0 and last else None,
+    }

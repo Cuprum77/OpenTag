@@ -158,7 +158,7 @@ async function getJson(path) {
   }
 }
 
-async function sendJson(method, path, payload, timeoutMs = 420000) {
+async function sendJson(method, path, payload, timeoutMs = 30000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -171,7 +171,7 @@ async function sendJson(method, path, payload, timeoutMs = 420000) {
     });
     return await readJson(res);
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error('Request timed out. Check history before retrying; server work may still be finishing.');
+    if (err.name === 'AbortError') throw new Error('The server did not answer in time.');
     throw err;
   } finally {
     clearTimeout(timer);
@@ -616,6 +616,31 @@ const STATUS_ROWS = [
   { key: 'google_keys', label: 'Google key announcement' }
 ];
 
+function statusBadge(dot, label, text, extra) {
+  return el('div', { className: 'status-badge' }, [
+    el('span', { className: 'status-dot ' + dot }),
+    el('span', { className: 'status-label', text: label }),
+    el('span', { text }),
+    extra ? el('span', { className: 'status-time', text: extra }) : null
+  ]);
+}
+
+function gapRecoveryBadge(gap, last) {
+  if (!gap || !gap.enabled) return statusBadge('none', 'Apple gap recovery', 'Off (apple_gap_recovery)');
+  let text;
+  if (gap.running) {
+    const left = Math.max(0, gap.total - gap.done);
+    const minutes = Math.ceil(left * (gap.request_interval_seconds || 60) / 60);
+    text = 'Pass ' + gap.done + '/' + gap.total + ' keys, ~' + minutes + ' min left';
+  } else if (gap.next_pass_unix) {
+    text = 'Last pass covered ' + plural(gap.total, 'key') + '; next ' + formatTime(gap.next_pass_unix);
+  } else {
+    text = 'Starts when the Apple queue is idle';
+  }
+  const dot = last && last.ok === false ? 'error' : (gap.total ? 'ok' : 'none');
+  return statusBadge(dot, 'Apple gap recovery', last && last.ok === false ? text + ' | ' + last.error : text);
+}
+
 async function refreshStatus() {
   const host = document.getElementById('status-container');
   let data;
@@ -625,21 +650,18 @@ async function refreshStatus() {
     replaceChildren(host, hint(String(err), true));
     return;
   }
-  replaceChildren(host, STATUS_ROWS.map(({ key, label }) => {
+  const rows = STATUS_ROWS.map(({ key, label }) => {
     const status = data[key];
-    let dot = 'none';
-    let text = 'No data yet';
-    if (status) {
-      dot = status.ok ? 'ok' : 'error';
-      text = status.ok ? (status.kind || 'OK').replace(/_/g, ' ') : (status.error || 'Failed');
+    if (!status) return statusBadge('none', label, 'No data yet');
+    let text = status.ok ? (status.kind || 'OK').replace(/_/g, ' ') : (status.error || 'Failed');
+    let extra = formatTime(status.timestamp_unix);
+    if (key === 'google_keys' && data.google_keys_schedule && data.google_keys_schedule.next_due_unix) {
+      extra += ' | next ' + formatTime(data.google_keys_schedule.next_due_unix);
     }
-    return el('div', { className: 'status-badge' }, [
-      el('span', { className: 'status-dot ' + dot }),
-      el('span', { className: 'status-label', text: label }),
-      el('span', { text }),
-      status && status.timestamp_unix ? el('span', { className: 'status-time', text: formatTime(status.timestamp_unix) }) : null
-    ]);
-  }));
+    return statusBadge(status.ok ? 'ok' : 'error', label, text, extra);
+  });
+  rows.splice(1, 0, gapRecoveryBadge(data.gap_recovery, data.apple_singleton));
+  replaceChildren(host, rows);
 }
 
 // ── Alerts (sticky until dismissed) ──
@@ -741,6 +763,65 @@ async function refreshHistory() {
   }
 }
 
+// ── Jobs (server-side work with progress) ──
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const knownActiveJobs = new Set();
+let jobsTimer = null;
+
+function describeJob(job) {
+  const progress = job.total > 1 && job.active ? ' (' + job.progress + '/' + job.total + ' done)' : '';
+  const who = job.trigger === 'auto' ? ' (automatic)' : job.trigger === 'upload' ? ' (after upload)' : '';
+  let text = job.label + who + ': ' + (job.state === 'queued' ? 'waiting in queue' : job.stage) + progress;
+  if (!job.active && job.error) text += ' | ' + job.error;
+  return text;
+}
+
+function jobRow(job) {
+  const pct = job.total > 0 ? Math.round(100 * job.progress / job.total) : (job.active ? 0 : 100);
+  return el('div', { className: 'job-row job-' + job.state }, [
+    el('div', { className: 'job-text', text: describeJob(job) }),
+    el('div', { className: 'job-bar' }, el('div', { className: 'job-bar-fill', style: 'width:' + pct + '%' }))
+  ]);
+}
+
+async function refreshJobs() {
+  clearTimeout(jobsTimer);
+  let list = [];
+  try {
+    list = (await getJson('/api/jobs')).jobs || [];
+  } catch (err) { /* try again later */ }
+  const active = list.filter(j => j.active);
+  replaceChildren(document.getElementById('jobs-container'), active.map(jobRow));
+  // A job finished since the last look (e.g. an automatic one): show its results.
+  const finished = [...knownActiveJobs].filter(id => !active.some(j => j.id === id));
+  knownActiveJobs.clear();
+  active.forEach(j => knownActiveJobs.add(j.id));
+  if (finished.length) refreshAfterJobs();
+  jobsTimer = setTimeout(refreshJobs, active.length ? 2000 : 20000);
+}
+
+function refreshAfterJobs() {
+  return Promise.all([refreshStatus(), refreshHistory(), refreshAlerts(), refreshInventory()]);
+}
+
+// Start a job and wait for it, reporting progress through `onUpdate(job)`.
+async function runJob(path, payload, onUpdate) {
+  let job = (await postJson(path, payload || {})).job;
+  knownActiveJobs.add(job.id);
+  refreshJobs();
+  while (job.active) {
+    if (onUpdate) onUpdate(job);
+    await sleep(1500);
+    try {
+      job = (await getJson('/api/jobs/' + job.id)).job;
+    } catch (err) {
+      if (onUpdate) onUpdate(Object.assign({}, job, { stage: 'Lost contact with the server, retrying…' }));
+    }
+  }
+  if (onUpdate) onUpdate(job);
+  return job;
+}
+
 // ── Actions ──
 async function fetchAllSelected() {
   const appleSelected = getMultiSelectedValues('apple-accessory-select');
@@ -752,39 +833,33 @@ async function fetchAllSelected() {
     return;
   }
 
-  const failures = [];
-  let stored = 0;
-  if (appleSelected.length > 0) {
-    try {
-      feedback('Fetching Apple tags; waiting for the rate limit may take up to 3 minutes.');
-      stored += (await postJson('/api/apple/fetch', { days: 7, tag_ids: appleSelected }, 240000)).stored || 0;
-    } catch (err) {
-      failures.push('Apple: ' + err.message);
-    }
-  }
-  if (googleSelected.length > 0) {
-    try {
-      feedback('Fetching ' + plural(googleSelected.length, 'Google tag') + '; this can take a minute per tag.');
-      const result = await postJson('/api/google/fetch', { tag_ids: googleSelected });
-      stored += result.stored || 0;
-      for (const fail of result.failed || []) failures.push('Google ' + fail.tag + ': ' + fail.error);
-    } catch (err) {
-      failures.push('Google: ' + err.message);
-    }
-  }
+  feedback('');  // live progress is shown in the job list above
+  const run = (key, path, ids) => runJob(path, { tag_ids: ids })
+    .catch(err => ({ state: 'failed', error: err.message, label: key }));
+  const started = [];
+  if (appleSelected.length > 0) started.push(run('Apple', '/api/apple/fetch', appleSelected));
+  if (googleSelected.length > 0) started.push(run('Google', '/api/google/fetch', googleSelected));
+  const results = await Promise.all(started);
 
-  if (failures.length > 0) {
-    feedback('Completed with errors (' + plural(stored, 'new location') + '). ' + failures.join(' | '), true);
+  let stored = 0;
+  const problems = [];
+  for (const job of results) {
+    stored += (job.result && job.result.stored) || 0;
+    if (job.state !== 'done') problems.push((job.label || 'Job') + ': ' + (job.error || job.state));
+  }
+  if (problems.length) {
+    feedback('Finished with errors (' + plural(stored, 'new location') + '). ' + problems.join(' | '), true);
   } else {
     feedback('Done: ' + plural(stored, 'new location') + '.');
   }
-  await Promise.all([refreshStatus(), refreshHistory(), refreshAlerts(), refreshInventory()]);
+  await refreshAfterJobs();
 }
 
 async function syncWithGoogle(feedbackId) {
   try {
-    const status = await postJson('/api/google/sync', {});
-    const d = status.details || {};
+    const job = await runJob('/api/google/sync', {}, j => setFeedback(feedbackId, describeJob(j)));
+    if (job.state !== 'done') throw new Error(job.error || 'Sync failed');
+    const d = job.result || {};
     const parts = ['Synced with Google at ' + new Date().toLocaleTimeString()];
     if (d.devices_uploaded !== undefined) parts.push(plural(d.devices_uploaded, 'tracker') + ' announced');
     if (d.tags_added) parts.push(plural(d.tags_added, 'tag') + ' added');
@@ -846,6 +921,7 @@ function bindUpload(formId, inputId, path, feedbackId, describe, confirmFn) {
       setFeedback(feedbackId, err.message, true);
     }
     await Promise.all([refreshFiles(), refreshInventory()]);
+    refreshJobs();
   });
 }
 
@@ -884,6 +960,7 @@ function initDashboard() {
   bindFileDelete('google-files-list', 'google-feedback');
   bindUpload('upload-accessories-form', 'accessories-file', '/api/upload/accessories', 'apple-feedback',
     r => 'Uploaded ' + plural(r.saved.items, 'accessory') + ' (' + plural(r.tags_added, 'new tag') + ')' +
+      (r.job ? ' | fetching their locations now (see Actions on the Overview)' : '') +
       ((r.warnings || []).length ? ' | ' + r.warnings.join(' | ') : ''));
   bindUpload('upload-secrets-form', 'secrets-file', '/api/upload/secrets', 'google-feedback',
     r => (r.saved.replaced ? 'Replaced' : 'Uploaded') + ' secrets.json (' + plural(r.tags_added, 'tag') + ' added, ' +
@@ -904,6 +981,7 @@ function initDashboard() {
   refreshStatus();
   refreshAlerts();
   refreshHistory();
+  refreshJobs();
 }
 
 if (document.readyState === 'loading') {

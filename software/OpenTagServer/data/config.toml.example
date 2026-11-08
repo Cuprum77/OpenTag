@@ -11,18 +11,14 @@ history_retention_days = 30                         # Maximum days of history ke
 log_level = "INFO"                                  # Logging level for Docker console: DEBUG, INFO, WARNING, ERROR
 
 
-# Apple: bulk updates plus with a per user sweep of singletons.
-apple_manual_wait_timeout_seconds = 180     # Maximum manual operation wait; capped at 180 seconds.
-google_refresh_settle_seconds = 15          # Wait after announcements refresh before automatic location queries.
-apple_singleton_sweep_enabled = true
-apple_singleton_sweep_interval_hours = 24   # Pause between completed passes; 0 keeps scanning continuously. Run/resume at container startup.
-apple_singleton_interval_seconds = 60       # Minimum spacing per user; shared limiter may make this longer.
-apple_request_interval_seconds = 60         # Shared across users/processes using this Haystack endpoint.
-apple_error_backoff_seconds = 300           # Shared cooldown on HTTP/network errors; honors longer Retry-After.
-apple_bulk_batch_size = 200     
-apple_query_days = 7                        # Lookback for automatic bulk and singleton fetches.
-# Set local_history=false to disable both automatic modes. Bulk interval 0 disables
-# only bulk polling; apple_singleton_sweep_enabled=false disables only the sweep.
+# Apple gap recovery: requests that ask for many keys at once have been seen to miss some
+# reports, so when nothing else is running every key is also queried on its own, one request
+# at a time. A full pass is repeated daily (and at startup). Set to false to disable.
+apple_gap_recovery = true
+apple_request_interval_seconds = 60  # Seconds between automatic Haystack requests (bulk batches and gap
+                                     # recovery). Manual fetches and fetches right after an upload only keep a
+                                     # 5 s gap. After an error all Apple requests pause for 5 minutes (or longer
+                                     # if Haystack sends Retry-After).
 
 # Admin account. The admin only manages user accounts (in the web UI) and cannot see
 # any keys, devices or locations. Generate the hash with: openssl passwd -6

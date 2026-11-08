@@ -1641,3 +1641,32 @@ body.dark .color-swatch.active {
 .confirm-summary {
   font-weight: 600;
 }
+
+/* ── Background jobs ── */
+.jobs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.job-row {
+  font-size: 12px;
+}
+.job-text {
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.job-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.job-bar-fill {
+  height: 100%;
+  background: #ff961f;
+  transition: width 0.4s;
+}
+.job-queued .job-bar-fill {
+  background: var(--text-muted);
+}

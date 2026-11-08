@@ -144,7 +144,11 @@ def _build_lookup_map(hashed_keys_map, source_map):
     return lookup
 
 
-def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=200, _alert_callback=None, _request_callback=None):
+BATCH_SIZE = 250  # keys per Haystack request
+
+
+def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, batch_size=BATCH_SIZE,
+                          _alert_callback=None, _request_callback=None, _progress_callback=None):
     endpoint = (haystack_cfg or {}).get("endpoint", "").strip()
     if not endpoint:
         raise ValueError("haystack endpoint is not configured")
@@ -168,8 +172,11 @@ def fetch_apple_locations(haystack_cfg, accessories_rows, days=7, timeout=30, ba
 
     reports = []
     batch_count = 0
+    total_batches = max(1, -(-len(ids) // max(1, batch_size)))
     for ids_batch in _chunked(ids, batch_size):
         batch_count += 1
+        if _progress_callback:
+            _progress_callback(batch_count, total_batches, len(ids_batch))
         payload = {
             "ids": ids_batch,
             "days": query_days,

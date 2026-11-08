@@ -3,13 +3,14 @@ import logging
 
 from flask import Blueprint, current_app, g, jsonify, request, send_file
 
+import apple_service
+import google_service
 import history
 import inventory
+import jobs
 import keystore
 import state
 from auth import user_required
-from fetch_apple import fetch_apple_locations
-from google_service import GoogleBusy, fetch_tags, sync_with_google
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,10 @@ def _uid():
 
 def _runtime():
     return current_app.config["OPENTAG"]
+
+
+def _scheduler():
+    return current_app.config["SCHEDULER"]
 
 
 def _error(message, status=400):
@@ -104,7 +109,11 @@ def upload_accessories():
     sync = inventory.sync_user(_uid(), username)
     warnings = keystore.get_index(username)["warnings"]
     logger.info("User %s uploaded %s (%d accessories, %d new tags)", username, saved["filename"], saved["items"], len(sync["added"]))
-    return jsonify({"ok": True, "saved": saved, "tags_added": len(sync["added"]), "warnings": warnings})
+    job = None
+    if sync["added"] and _runtime()["haystack"].get("endpoint"):
+        # First fetch for new tags right away, without the automatic request spacing.
+        job = _scheduler().submit(_uid(), "apple_fetch", "upload", {"tag_ids": sorted(sync["added"])})
+    return jsonify({"ok": True, "saved": saved, "tags_added": len(sync["added"]), "warnings": warnings, "job": job})
 
 
 @api_bp.post("/upload/secrets")
@@ -176,74 +185,71 @@ def devices_ungroup(device_id):
 
 # ── fetching ──
 
+def _tag_ids_param(provider):
+    """Validated tag_ids from the request body (None = all tags of the provider)."""
+    tag_ids = _string_list(_body().get("tag_ids"), "tag_ids")
+    if tag_ids is None:
+        return None
+    if not tag_ids:
+        raise ValueError(f"no {provider.capitalize()} tags selected")
+    inventory.sync_user(_uid(), g.user["username"])
+    known = {t["stable_id"] for t in keystore.all_tags(keystore.get_index(g.user["username"])) if t["provider"] == provider}
+    if not set(tag_ids) <= known:
+        raise ValueError(f"unknown {provider.capitalize()} tag")
+    return sorted(set(tag_ids))
+
+
 @api_bp.post("/apple/fetch")
 @user_required
 def apple_fetch():
-    username = g.user["username"]
-    body = _body()
     try:
-        tag_ids = _string_list(body.get("tag_ids"), "tag_ids")
-        days = max(1, min(7, int(body.get("days", 7))))
-    except (TypeError, ValueError) as exc:
+        tag_ids = _tag_ids_param("apple")
+    except ValueError as exc:
         return _error(str(exc))
-    inventory.sync_user(_uid(), username)
-    rows = keystore.apple_rows(keystore.get_index(username), set(tag_ids) if tag_ids is not None else None)
-    if not rows:
-        return _error("no Apple tags selected" if tag_ids is not None else "upload an Apple accessories file first")
-
-    runtime = _runtime()
-
-    def report_failure(fail):
-        reason = fail.get("reason", "unknown")
-        alert_type = "orphaned_report" if reason == "missing_private_key" else "decryption_failure"
-        state.add_alert(_uid(), "apple", alert_type, reason, target="haystack_report")
-
-    try:
-        with current_app.config["APPLE_REQUEST_LIMITER"].manual_fetch(
-                runtime["apple_manual_wait_timeout_seconds"]) as request_callback:
-            payload = fetch_apple_locations(
-                runtime["haystack"], rows, days=days, timeout=30,
-                batch_size=runtime["apple_bulk_batch_size"],
-                _alert_callback=report_failure, _request_callback=request_callback,
-            )
-    except Exception as exc:
-        status = state.set_status(_uid(), "apple", False, "fetch_location", error=exc)
-        state.add_alert(_uid(), "apple", "manual_fetch_error", exc, target="apple_locations")
-        logger.error("Apple fetch failed for %s: %s", username, exc)
-        return jsonify(status), 502
-
-    stored = history.store_events(_uid(), history.apple_events(payload))
-    status = state.set_status(_uid(), "apple", True, "fetch_location", details=payload)
-    logger.info("Apple fetch for %s: %d reports, %d new events", username, payload["counts"]["decoded"], stored)
-    return jsonify(dict(status, stored=stored))
+    if not keystore.get_index(g.user["username"])["apple"]:
+        return _error("upload an Apple accessories file first")
+    if not _runtime()["haystack"].get("endpoint"):
+        return _error("haystack_endpoint is not set in config.toml")
+    params = {} if tag_ids is None else {"tag_ids": tag_ids}
+    return jsonify({"job": _scheduler().submit(_uid(), "apple_fetch", "manual", params)}), 202
 
 
 @api_bp.post("/google/fetch")
 @user_required
 def google_fetch():
     try:
-        tag_ids = _string_list(_body().get("tag_ids"), "tag_ids")
-        result = fetch_tags(g.user, set(tag_ids) if tag_ids is not None else None, manual=True)
-    except GoogleBusy as exc:
-        return _error(str(exc), 409)
+        tag_ids = _tag_ids_param("google")
     except ValueError as exc:
         return _error(str(exc))
-    if result["failed"] and not result["fetched"]:
-        return jsonify(dict(result, error=result["failed"][0]["error"])), 502
-    return jsonify(dict(result, ok=not result["failed"]))
+    if not keystore.secrets_path(g.user["username"]):
+        return _error("upload secrets.json first")
+    params = {} if tag_ids is None else {"tag_ids": tag_ids}
+    return jsonify({"job": _scheduler().submit(_uid(), "google_fetch", "manual", params)}), 202
 
 
 @api_bp.post("/google/sync")
 @user_required
 def google_sync():
-    try:
-        return jsonify(sync_with_google(g.user, manual=True))
-    except GoogleBusy as exc:
-        return _error(str(exc), 409)
-    except ValueError as exc:
-        return _error(str(exc))
-    except Exception as exc:
-        return _error(state.clean_error_message(exc), 502)
+    if not keystore.secrets_path(g.user["username"]):
+        return _error("upload secrets.json first")
+    return jsonify({"job": _scheduler().submit(_uid(), "google_sync", "manual")}), 202
+
+
+# ── jobs ──
+
+@api_bp.get("/jobs")
+@user_required
+def jobs_list():
+    return jsonify({"jobs": jobs.list_recent(_uid())})
+
+
+@api_bp.get("/jobs/<int:job_id>")
+@user_required
+def jobs_get(job_id):
+    job = jobs.get(_uid(), job_id)
+    if job is None:
+        return _error("job not found", 404)
+    return jsonify({"job": job})
 
 
 # ── history / status / alerts ──
@@ -262,7 +268,10 @@ def history_get():
 @api_bp.get("/status")
 @user_required
 def status_get():
-    return jsonify({name: state.get_status(_uid(), name) for name in ("apple", "apple_singleton", "google", "google_keys")})
+    status = {name: state.get_status(_uid(), name) for name in ("apple", "apple_singleton", "google", "google_keys")}
+    status["gap_recovery"] = apple_service.sweep_status(_runtime(), _uid())
+    status["google_keys_schedule"] = google_service.key_sync_status(_runtime(), _uid())
+    return jsonify(status)
 
 
 @api_bp.get("/alerts")
